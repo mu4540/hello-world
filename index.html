@@ -6,9 +6,9 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="寒霜獵人">
+<meta name="apple-mobile-web-app-title" content="寒霜營地">
 <meta name="theme-color" content="#dfe9f4">
-<title>寒霜獵人 ❄️ Frost Hunter 3D</title>
+<title>寒霜營地 ❄️ Frost Camp</title>
 <style>
   :root {
     --sat: env(safe-area-inset-top, 0px);
@@ -36,74 +36,94 @@
 <script type="module">
 import * as THREE from './three.module.min.js';
 
-// ============ 基本常數（世界座標：x 0..420，y 0..2300，北方 y 小）============
-const WORLD_W = 420;
-const CAMP = { top: 1750, bot: 2260, left: 40, right: 380 };
-const GATE = { x0: 150, x1: 270 };
-const MEAT_VAL = 3;
-const PLAYER_SPEED = 165;
+// ============ 世界配置（營地在正中央，越遠越冷）============
+const WORLD_W = 840, WORLD_H = 2300;
+const FURNACE = { x: 420, y: 1150 };          // 中央大火爐
+const wx = x => x - FURNACE.x;                 // 世界 → 3D X
+const SURVIVOR_GOAL = 5;
+const FURNACE_MAX = 5;
 
-const BEAR_SPAWNS = [
-  { x: 120, y: 1480, tier: 0 }, { x: 300, y: 1390, tier: 0 }, { x: 210, y: 1240, tier: 0 },
-  { x: 95,  y: 960,  tier: 1 }, { x: 330, y: 830,  tier: 1 }, { x: 200, y: 660,  tier: 1 },
-  { x: 210, y: 260,  tier: 2 }
-];
-const TIER = [
-  { hp: 60,  dmg: 8,  speed: 85,  size: .8,  meat: 5,  aggro: 150 },
-  { hp: 150, dmg: 14, speed: 72,  size: 1.15, meat: 9,  aggro: 170 },
-  { hp: 700, dmg: 24, speed: 58,  size: 1.9, meat: 40, aggro: 230 }
-];
+function warmRadius() { return 115 + state.furnaceLv * 32; }
+function bagCap() { return 8 + state.bagLv * 4; }
+function gatherSpeed() { return 1 + state.toolLv * 0.45; }
 
-function makeStations() {
+// 建設圈（站上去自動消耗資源）
+function makeRings() {
   return {
-    fire:    { x: 210, y: 1990, lv: 1, costs: [20, 45],           label: '營火',   icon: '🔥' },
-    anvil:   { x: 96,  y: 2090, lv: 0, costs: [30, 60, 110, 180], label: '強化武器', icon: '⚒️' },
-    tent:    { x: 324, y: 2090, lv: 0, costs: [25, 55, 100],      label: '帳篷',   icon: '⛺' },
-    recruit: { x: 210, y: 2185, lv: 0, costs: [45, 45, 45],       label: '招募夥伴', icon: '🤝' }
+    furnace: { x: 420, y: 1235, res: 'wood',  costs: [15, 28, 48, 75], label: '火爐升級', icon: '🔥' },
+    bag:     { x: 332, y: 1180, res: 'stone', costs: [10, 22, 40],     label: '背包擴充', icon: '🎒' },
+    tool:    { x: 508, y: 1180, res: 'stone', costs: [8, 18, 35],      label: '工具強化', icon: '⚒️' }
   };
 }
-
-// 世界 → 3D：X = x-210（東正），Z = y（南正），高度 = Y
-const wx = x => x - 210;
 
 // ============ 狀態 ============
 let state, floatTexts, particles2d;
 
-function spawnBear(s) {
-  const t = TIER[s.tier];
-  return {
-    x: s.x, y: s.y, hx: s.x, hy: s.y, tier: s.tier,
-    vx: 0, vy: 0, kx: 0, ky: 0, heading: Math.random() * 6.28,
-    hp: t.hp, maxHp: t.hp, size: t.size,
-    state: 'idle', tx: s.x, ty: s.y, wanderT: 1 + Math.random() * 2,
-    atkCd: 0, hitFlash: 0, walk: Math.random() * 6.28, deadT: 0, respawnT: 0
+function ringPos(dist, ang) {
+  return { x: FURNACE.x + Math.cos(ang) * dist, y: FURNACE.y + Math.sin(ang) * dist * 0.95 };
+}
+
+function genWorld() {
+  const trees = [], rocks = [], survivors = [];
+  const taken = [];
+  const ok = (x, y, r) => {
+    if (x < 40 || x > WORLD_W - 40 || y < 90 || y > WORLD_H - 90) return false;
+    for (const t of taken) if (Math.hypot(x - t.x, y - t.y) < r + t.r) return false;
+    taken.push({ x, y, r });
+    return true;
   };
+  taken.push({ x: FURNACE.x, y: FURNACE.y, r: 150 });
+  for (let i = 0; i < 30; i++) {
+    for (let k = 0; k < 30; k++) {
+      const p = ringPos(185 + Math.random() * 640, Math.random() * 6.28);
+      if (ok(p.x, p.y, 46)) { trees.push({ x: p.x, y: p.y, hp: 4, maxHp: 4, shake: 0, fallT: 0, respawnT: 0, popT: 0 }); break; }
+    }
+  }
+  for (let i = 0; i < 16; i++) {
+    for (let k = 0; k < 30; k++) {
+      const p = ringPos(225 + Math.random() * 600, Math.random() * 6.28);
+      if (ok(p.x, p.y, 44)) { rocks.push({ x: p.x, y: p.y, hp: 5, maxHp: 5, shake: 0, respawnT: 0, popT: 0 }); break; }
+    }
+  }
+  for (let i = 0; i < SURVIVOR_GOAL; i++) {
+    for (let k = 0; k < 40; k++) {
+      const p = ringPos(380 + Math.random() * 420, (i / SURVIVOR_GOAL) * 6.28 + (Math.random() - .5) * 0.8);
+      if (ok(p.x, p.y, 60)) {
+        survivors.push({
+          x: p.x, y: p.y, state: 'frozen', rescueT: 0,
+          vx: 0, vy: 0, heading: Math.random() * 6.28, walk: 0,
+          carry: 0, task: 'warm', taskT: 0, target: null
+        });
+        break;
+      }
+    }
+  }
+  return { trees, rocks, survivors };
 }
 
 function reset() {
+  const w = genWorld();
   state = {
-    phase: 'title', meat: 0, kills: 0, deaths: 0, time: 0,
+    phase: 'title',
+    wood: 0, stone: 0, rescued: 0, collapses: 0,
+    chopped: 0, mined: 0, time: 0,
+    warmth: 100,
+    furnaceLv: 1, bagLv: 0, toolLv: 0,
     player: {
-      x: 210, y: 2050, vx: 0, vy: 0, heading: Math.PI,
-      hp: 100, walk: 0, swing: 0, atkCd: 0,
-      pendingHit: null, hurtFlash: 0, deadT: 0
+      x: FURNACE.x, y: FURNACE.y + 90, vx: 0, vy: 0, heading: Math.PI,
+      walk: 0, carryWood: 0, carryStone: 0,
+      action: null, hitT: 0, collapseT: 0, depositT: 0
     },
-    stations: makeStations(),
-    stPaid: {},
-    bears: BEAR_SPAWNS.map(spawnBear),
-    meats: [],
-    followers: [],
+    rings: makeRings(),
+    paid: {},
+    trees: w.trees, rocks: w.rocks, survivors: w.survivors,
+    items: [],          // 飛行/掉落資源 {type, x,y,h, fly, t, ...}
     shake: 0
   };
   floatTexts = [];
   particles2d = [];
-  // 清掉動態網格
   while (dyn.children.length) dyn.remove(dyn.children[0]);
 }
-
-function playerDmg() { return 10 + state.stations.anvil.lv * 8; }
-function playerMaxHp() { return 100 + state.stations.tent.lv * 40; }
-function healRate() { return 6 + state.stations.fire.lv * 5; }
 
 function addFloat(x, y, h, text, color, size) {
   floatTexts.push({ x, y, h: h + 10, text, color: color || '#fff', life: 1.1, size: size || 15 });
@@ -137,7 +157,7 @@ function beep(freq, dur, type, vol) {
   } catch (e) {}
 }
 
-// ============ 輸入 ============
+// ============ 輸入（單指搖桿 / WASD）============
 const keys = {};
 window.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; });
 window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
@@ -175,25 +195,23 @@ try {
 } catch (e) { glOK = false; }
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0xe2ebf5);
-scene.fog = new THREE.Fog(0xe2ebf5, 850, 2100);
+scene.background = new THREE.Color(0xdde9f5);
+scene.fog = new THREE.Fog(0xdde9f5, 780, 1900);
 
 const camera = new THREE.PerspectiveCamera(50, 1, 10, 4000);
-const CAM_OFF = new THREE.Vector3(0, 700, 520);
-let camTarget = new THREE.Vector3(0, 0, 2050);
+const CAM_OFF = new THREE.Vector3(0, 690, 510);
+let camTarget = new THREE.Vector3(0, 0, FURNACE.y + 90);
 
-// 燈光
 scene.add(new THREE.HemisphereLight(0xcfe2ff, 0xffffff, 0.95));
-const sun = new THREE.DirectionalLight(0xfff4e0, 1.5);
+const sun = new THREE.DirectionalLight(0xfff4e0, 1.4);
 sun.castShadow = true;
 sun.shadow.mapSize.set(1024, 1024);
-sun.shadow.camera.left = -460; sun.shadow.camera.right = 460;
-sun.shadow.camera.top = 460; sun.shadow.camera.bottom = -460;
+sun.shadow.camera.left = -480; sun.shadow.camera.right = 480;
+sun.shadow.camera.top = 480; sun.shadow.camera.bottom = -480;
 sun.shadow.camera.near = 10; sun.shadow.camera.far = 2200;
 sun.shadow.bias = -0.002;
 scene.add(sun); scene.add(sun.target);
 
-// 材質快取
 const matCache = {};
 function mat(color) {
   if (!matCache[color]) matCache[color] = new THREE.MeshLambertMaterial({ color });
@@ -205,328 +223,330 @@ function box(w, h, d, color) {
   return m;
 }
 
-// 地面（程序雪地紋理）
+// 雪地
 function snowTexture() {
   const c = document.createElement('canvas');
   c.width = c.height = 256;
   const g = c.getContext('2d');
   g.fillStyle = '#eef3f8'; g.fillRect(0, 0, 256, 256);
   for (let i = 0; i < 60; i++) {
-    g.fillStyle = Math.random() < .5 ? 'rgba(255,255,255,.5)' : 'rgba(190,208,228,.35)';
+    g.fillStyle = Math.random() < .5 ? 'rgba(255,255,255,.5)' : 'rgba(186,206,228,.32)';
     g.beginPath();
     g.ellipse(Math.random() * 256, Math.random() * 256, 8 + Math.random() * 26, 4 + Math.random() * 10, Math.random() * 3, 0, 6.28);
     g.fill();
   }
   const tx = new THREE.CanvasTexture(c);
   tx.wrapS = tx.wrapT = THREE.RepeatWrapping;
-  tx.repeat.set(10, 18);
+  tx.repeat.set(12, 18);
   return tx;
 }
-const ground = new THREE.Mesh(
-  new THREE.PlaneGeometry(1800, 3600),
-  new THREE.MeshLambertMaterial({ map: snowTexture() })
-);
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(2400, 3600), new THREE.MeshLambertMaterial({ map: snowTexture() }));
 ground.rotation.x = -Math.PI / 2;
-ground.position.set(0, 0, 1150);
+ground.position.set(0, 0, FURNACE.y);
 ground.receiveShadow = true;
 scene.add(ground);
 
-// 營地泥土地
-const dirt = new THREE.Mesh(
-  new THREE.PlaneGeometry(CAMP.right - CAMP.left, CAMP.bot - CAMP.top),
-  mat(0xc89a66)
-);
-dirt.rotation.x = -Math.PI / 2;
-dirt.position.set(0, 0.4, (CAMP.top + CAMP.bot) / 2);
-dirt.receiveShadow = true;
-scene.add(dirt);
+// ===== 中央大火爐（原創造型：石塔＋熔火裂紋＋頂部火焰）=====
+const ST = {};
+(function buildFurnace() {
+  const g = new THREE.Group();
+  g.position.set(0, 0, FURNACE.y);
+  // 石基座
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(26, 30, 12, 12), mat(0x8a93a2));
+  base.position.y = 6; base.castShadow = true; base.receiveShadow = true; g.add(base);
+  // 爐身石塔
+  const tower = new THREE.Mesh(new THREE.CylinderGeometry(13, 17, 52, 10), mat(0x5a626e));
+  tower.position.y = 38; tower.castShadow = true; g.add(tower);
+  // 熔火環帶（發光）
+  const bands = [];
+  for (let i = 0; i < 3; i++) {
+    const band = new THREE.Mesh(new THREE.TorusGeometry(14.6 - i * 1.1, 1.6, 8, 18),
+      new THREE.MeshLambertMaterial({ color: 0xff7a2a, emissive: 0xff5c1a, emissiveIntensity: 1 }));
+    band.rotation.x = Math.PI / 2;
+    band.position.y = 22 + i * 14;
+    g.add(band); bands.push(band);
+  }
+  // 爐口
+  const mouth = new THREE.Mesh(new THREE.BoxGeometry(12, 12, 6),
+    new THREE.MeshLambertMaterial({ color: 0x2a1a10, emissive: 0xff6a20, emissiveIntensity: .9 }));
+  mouth.position.set(0, 11, 16); g.add(mouth);
+  // 頂部火焰
+  const flames = [];
+  const fc = [[0xff5c2a, 12, 26], [0xff9d3c, 8, 19], [0xffd24a, 4.6, 12]];
+  for (const [c, r, h] of fc) {
+    const f = new THREE.Mesh(new THREE.ConeGeometry(r, h, 8), new THREE.MeshBasicMaterial({ color: c }));
+    f.position.y = 64 + h / 2;
+    g.add(f); flames.push(f);
+  }
+  // 火光
+  const light = new THREE.PointLight(0xff9d3c, 2, 420, 1.3);
+  light.position.y = 50;
+  g.add(light);
+  // 柴堆裝飾
+  for (let i = 0; i < 5; i++) {
+    const log = new THREE.Mesh(new THREE.CylinderGeometry(2.4, 2.4, 18, 6), mat(0x6b4a2a));
+    log.rotation.z = Math.PI / 2; log.rotation.y = i * 1.3;
+    log.position.set(24 + (i % 2) * 5, 2.4, -14 + i * 6);
+    log.castShadow = true;
+    g.add(log);
+  }
+  scene.add(g);
+  ST.flames = flames; ST.fireLight = light; ST.bands = bands;
+})();
 
-// 柵欄（實例化木樁＋雪頂）
-(function buildFence() {
-  const pts = [];
-  for (let x = CAMP.left; x <= GATE.x0 - 8; x += 14) pts.push([x, CAMP.top]);
-  for (let x = GATE.x1 + 8; x <= CAMP.right; x += 14) pts.push([x, CAMP.top]);
-  for (let y = CAMP.top + 14; y <= CAMP.bot; y += 14) { pts.push([CAMP.left, y]); pts.push([CAMP.right, y]); }
-  for (let x = CAMP.left + 14; x <= CAMP.right - 14; x += 14) pts.push([x, CAMP.bot]);
-  const post = new THREE.InstancedMesh(new THREE.CylinderGeometry(4, 4.5, 30, 7), mat(0xb8884e), pts.length);
-  const cap = new THREE.InstancedMesh(new THREE.SphereGeometry(4.6, 8, 6), mat(0xf4f8fc), pts.length);
-  post.castShadow = cap.castShadow = true;
+// 溫暖區（橘色光圈，半徑隨等級成長）
+const warmZone = new THREE.Mesh(new THREE.CircleGeometry(1, 48),
+  new THREE.MeshBasicMaterial({ color: 0xff9d3c, transparent: true, opacity: 0.10, depthWrite: false }));
+warmZone.rotation.x = -Math.PI / 2;
+warmZone.position.set(0, 0.5, FURNACE.y);
+scene.add(warmZone);
+const warmEdge = new THREE.Mesh(new THREE.RingGeometry(0.965, 1, 56),
+  new THREE.MeshBasicMaterial({ color: 0xffb14a, transparent: true, opacity: 0.45, depthWrite: false, side: THREE.DoubleSide }));
+warmEdge.rotation.x = -Math.PI / 2;
+warmEdge.position.set(0, 0.6, FURNACE.y);
+scene.add(warmEdge);
+
+// 營地北側裝飾矮柵欄＋紅門（不擋路）
+(function buildDecorFence() {
+  const z = FURNACE.y - 150;
+  const posts = [];
+  for (let x = -150; x <= -40; x += 14) posts.push(x);
+  for (let x = 40; x <= 150; x += 14) posts.push(x);
+  const post = new THREE.InstancedMesh(new THREE.CylinderGeometry(3.4, 3.8, 24, 7), mat(0xb8884e), posts.length);
+  const cap = new THREE.InstancedMesh(new THREE.SphereGeometry(4, 8, 6), mat(0xf4f8fc), posts.length);
+  post.castShadow = true;
   const m4 = new THREE.Matrix4();
-  pts.forEach(([x, y], i) => {
-    m4.makeTranslation(wx(x), 15 + (i % 3), y);
+  posts.forEach((x, i) => {
+    m4.makeTranslation(x, 12 + (i % 3), z);
     post.setMatrixAt(i, m4);
-    m4.makeTranslation(wx(x), 30 + (i % 3), y);
+    m4.makeTranslation(x, 24 + (i % 3), z);
     cap.setMatrixAt(i, m4);
   });
   scene.add(post); scene.add(cap);
+  for (const side of [-1, 1]) {
+    const gate = new THREE.Group();
+    const frame = box(38, 30, 3, 0xe8a83c); frame.position.y = 15; gate.add(frame);
+    const face = box(32, 24, 3.4, 0xc23a3a); face.position.y = 15; gate.add(face);
+    const bar = box(36, 4, 3.8, 0xe8a83c); bar.position.y = 15; bar.rotation.z = side * 0.5; gate.add(bar);
+    gate.position.set(side * 20, 0, z);
+    scene.add(gate);
+  }
 })();
 
-// 紅色大門（兩片，靠近滑開）
-function makeGatePanel() {
+// 建設圈
+const ringGeo = new THREE.RingGeometry(30, 36, 40);
+const ringMeshes = {};
+for (const [key, r] of Object.entries(makeRings())) {
+  const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: .85, side: THREE.DoubleSide, depthWrite: false }));
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.set(wx(r.x), 0.8, r.y);
+  scene.add(ring);
+  ringMeshes[key] = ring;
+}
+
+// ===== 樹 / 礦石 工廠 =====
+function makeTree() {
   const g = new THREE.Group();
-  const frame = box(58, 36, 3, 0xe8a83c); frame.position.y = 18; g.add(frame);
-  const face = box(50, 30, 3.4, 0xc23a3a); face.position.y = 18; g.add(face);
-  for (const r of [0.55, -0.55]) {
-    const bar = box(56, 5, 3.8, 0xe8a83c);
-    bar.position.y = 18; bar.rotation.z = r; g.add(bar);
-  }
+  const s = 1.15;
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(2.8 * s, 3.4 * s, 13 * s, 6), mat(0x6b4a2a));
+  trunk.position.y = 6.5 * s; trunk.castShadow = true; g.add(trunk);
+  const c1 = new THREE.Mesh(new THREE.ConeGeometry(17 * s, 27 * s, 7), mat(0x2a6647));
+  c1.position.y = 24 * s; c1.castShadow = true; g.add(c1);
+  const c2 = new THREE.Mesh(new THREE.ConeGeometry(12 * s, 21 * s, 7), mat(0x35775a));
+  c2.position.y = 38 * s; c2.castShadow = true; g.add(c2);
+  const snowC = new THREE.Mesh(new THREE.ConeGeometry(7.5 * s, 12 * s, 7), mat(0xf4f8fc));
+  snowC.position.y = 49 * s; g.add(snowC);
   return g;
 }
-const gateL = makeGatePanel(), gateR = makeGatePanel();
-gateL.position.set(wx(GATE.x0) + 29, 0, CAMP.top);
-gateR.position.set(wx(GATE.x1) - 29, 0, CAMP.top);
-scene.add(gateL); scene.add(gateR);
-
-// ===== 建設站網格 =====
-const ST = {};   // 各站動畫參照
-
-// 營火
-(function buildFire() {
-  const st = makeStations().fire;
+function makeOreRock() {
   const g = new THREE.Group();
-  g.position.set(wx(st.x), 0, st.y);
-  for (let i = 0; i < 4; i++) {
-    const log = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 2.6, 26, 6), mat(0x6b4a2a));
-    log.rotation.z = Math.PI / 2; log.rotation.y = i * 0.8;
-    log.position.y = 2.6; log.castShadow = true;
-    g.add(log);
+  const r1 = new THREE.Mesh(new THREE.DodecahedronGeometry(11, 0), mat(0x8b97a6));
+  r1.position.y = 5; r1.scale.y = .75; r1.castShadow = true; g.add(r1);
+  const r2 = new THREE.Mesh(new THREE.DodecahedronGeometry(7, 0), mat(0x7a8694));
+  r2.position.set(9, 3.4, 4); r2.scale.y = .7; r2.castShadow = true; g.add(r2);
+  for (let i = 0; i < 3; i++) {
+    const ore = new THREE.Mesh(new THREE.DodecahedronGeometry(2.2, 0),
+      new THREE.MeshLambertMaterial({ color: 0xd88a3c, emissive: 0x8a4a10, emissiveIntensity: .65 }));
+    ore.position.set(-5 + i * 5, 7 + (i % 2) * 3, 5 - i * 3);
+    g.add(ore);
   }
-  const flames = [];
-  const fc = [[0xff5c2a, 11, 22], [0xff9d3c, 7.5, 16], [0xffd24a, 4.5, 10]];
-  for (const [c, r, h] of fc) {
-    const f = new THREE.Mesh(new THREE.ConeGeometry(r, h, 8), new THREE.MeshBasicMaterial({ color: c }));
-    f.position.y = 4 + h / 2;
-    g.add(f); flames.push(f);
-  }
-  const light = new THREE.PointLight(0xff9d3c, 1.6, 320, 1.4);
-  light.position.y = 26;
-  g.add(light);
-  scene.add(g);
-  ST.flames = flames; ST.fireLight = light;
-})();
-
-// 鐵砧＋發光磚
-(function buildAnvil() {
-  const st = makeStations().anvil;
-  const g = new THREE.Group();
-  g.position.set(wx(st.x), 0, st.y);
-  const base = box(16, 10, 12, 0x55606c); base.position.y = 5; g.add(base);
-  const top = box(30, 8, 14, 0x7a8694); top.position.y = 14; g.add(top);
-  const bricks = [];
-  for (let i = 0; i < 4; i++) {
-    const b = new THREE.Mesh(new THREE.BoxGeometry(14, 5, 8),
-      new THREE.MeshLambertMaterial({ color: 0xe89a3c, emissive: 0xa05a10, emissiveIntensity: .7 }));
-    b.position.set(-26 + (i % 2) * 16, 2.5 + Math.floor(i / 2) * 6, -14);
-    b.castShadow = true; b.visible = false;
-    g.add(b); bricks.push(b);
-  }
-  scene.add(g);
-  ST.bricks = bricks;
-})();
-
-// 帳篷
-(function buildTent() {
-  const st = makeStations().tent;
-  const tent = new THREE.Mesh(new THREE.ConeGeometry(26, 34, 4), mat(0x3a78c2));
-  tent.rotation.y = Math.PI / 4;
-  tent.position.set(wx(st.x), 17, st.y);
-  tent.castShadow = true;
-  scene.add(tent);
-  const snowTop = new THREE.Mesh(new THREE.ConeGeometry(10, 13, 4), mat(0xf4f8fc));
-  snowTop.rotation.y = Math.PI / 4;
-  snowTop.position.set(wx(st.x), 38, st.y);
-  scene.add(snowTop);
-  ST.tent = tent; ST.tentSnow = snowTop;
-})();
-
-// 招募長椅
-(function buildBench() {
-  const st = makeStations().recruit;
-  const g = new THREE.Group();
-  g.position.set(wx(st.x), 0, st.y);
-  const seat = box(46, 4, 14, 0xb8884e); seat.position.y = 10; g.add(seat);
-  for (const sx of [-18, 18]) { const leg = box(5, 10, 12, 0x96693a); leg.position.set(sx, 5, 0); g.add(leg); }
-  const snowS = box(46, 2, 14, 0xf4f8fc); snowS.position.y = 13; g.add(snowS);
-  scene.add(g);
-})();
-
-// 升級圈（白色圓環）
-const ringGeo = new THREE.RingGeometry(36, 43, 42);
-const rings = {};
-for (const [key, st] of Object.entries(makeStations())) {
-  const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: .85, side: THREE.DoubleSide }));
-  ring.rotation.x = -Math.PI / 2;
-  ring.position.set(wx(st.x), 0.8, st.y);
-  scene.add(ring);
-  rings[key] = ring;
-}
-
-// 魔王巢穴冰刺
-for (let i = 0; i < 10; i++) {
-  const a = i / 10 * 6.28;
-  const spike = new THREE.Mesh(new THREE.ConeGeometry(8, 30 + (i % 3) * 12, 6),
-    new THREE.MeshLambertMaterial({ color: 0xb8e2f8, emissive: 0x2a6a8a, emissiveIntensity: .25 }));
-  spike.position.set(Math.cos(a) * 95, 15 + (i % 3) * 6, 260 + Math.sin(a) * 70);
-  spike.rotation.z = (Math.random() - .5) * .3;
-  spike.castShadow = true;
-  scene.add(spike);
-}
-
-// 裝飾：松樹 / 枯樹 / 岩石
-function makePine(s) {
-  const g = new THREE.Group();
-  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(2.5 * s, 3 * s, 12 * s, 6), mat(0x6b4a2a));
-  trunk.position.y = 6 * s; trunk.castShadow = true; g.add(trunk);
-  const c1 = new THREE.Mesh(new THREE.ConeGeometry(16 * s, 26 * s, 7), mat(0x2a6647));
-  c1.position.y = 22 * s; c1.castShadow = true; g.add(c1);
-  const c2 = new THREE.Mesh(new THREE.ConeGeometry(11 * s, 20 * s, 7), mat(0x35775a));
-  c2.position.y = 36 * s; c2.castShadow = true; g.add(c2);
-  const snowC = new THREE.Mesh(new THREE.ConeGeometry(7 * s, 12 * s, 7), mat(0xf4f8fc));
-  snowC.position.y = 46 * s; g.add(snowC);
   return g;
 }
 function makeDeadTree(s) {
   const g = new THREE.Group();
-  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(2 * s, 3.4 * s, 52 * s, 6), mat(0x8a5a3c));
-  trunk.position.y = 26 * s; trunk.castShadow = true; g.add(trunk);
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(2 * s, 3.4 * s, 50 * s, 6), mat(0x8a6248));
+  trunk.position.y = 25 * s; trunk.castShadow = true; g.add(trunk);
   for (let i = 0; i < 4; i++) {
-    const br = new THREE.Mesh(new THREE.CylinderGeometry(1 * s, 1.6 * s, 20 * s, 5), mat(0x8a5a3c));
-    br.position.y = (16 + i * 9) * s;
+    const br = new THREE.Mesh(new THREE.CylinderGeometry(1 * s, 1.6 * s, 19 * s, 5), mat(0x8a6248));
+    br.position.y = (15 + i * 9) * s;
     br.rotation.z = (i % 2 ? 1 : -1) * 1.0;
-    br.position.x = (i % 2 ? 1 : -1) * 8 * s;
+    br.position.x = (i % 2 ? 1 : -1) * 7 * s;
     br.castShadow = true;
     g.add(br);
   }
   return g;
 }
-function makeRock(s) {
-  const r = new THREE.Mesh(new THREE.DodecahedronGeometry(9 * s, 0), mat(0x9aa6b4));
-  r.position.y = 4 * s;
-  r.scale.y = 0.7;
-  r.castShadow = true;
+function makeBoulder(s) {
+  const r = new THREE.Mesh(new THREE.DodecahedronGeometry(10 * s, 0), mat(0xa8b2bf));
+  r.position.y = 4 * s; r.scale.y = 0.65; r.castShadow = true;
   return r;
 }
+
+// 遠景裝飾
 (function buildDecor() {
-  for (let i = 0; i < 30; i++) {
-    const y = 80 + Math.random() * 1560;
-    const x = 20 + Math.random() * (WORLD_W - 40);
-    if (Math.hypot(x - 210, y - 260) < 160) continue;
-    const s = .7 + Math.random() * .7;
-    const r = Math.random();
-    const m = r < .4 ? makePine(s) : (r < .75 ? makeDeadTree(s) : makeRock(s));
+  for (let i = 0; i < 26; i++) {
+    const a = Math.random() * 6.28;
+    const d = 880 + Math.random() * 320;
+    const x = FURNACE.x + Math.cos(a) * d, y = FURNACE.y + Math.sin(a) * d * 0.95;
+    const s = .8 + Math.random() * .7;
+    const m = Math.random() < .55 ? makeDeadTree(s) : makeBoulder(s);
     m.position.set(wx(x), 0, y);
     m.rotation.y = Math.random() * 6.28;
     scene.add(m);
   }
+  for (let i = 0; i < 10; i++) {   // 玩法區內少量枯樹點綴
+    const a = Math.random() * 6.28, d = 260 + Math.random() * 560;
+    const x = FURNACE.x + Math.cos(a) * d, y = FURNACE.y + Math.sin(a) * d * 0.95;
+    const m = makeDeadTree(.6 + Math.random() * .4);
+    m.position.set(wx(x), 0, y);
+    scene.add(m);
+  }
 })();
 
-// ===== 角色 / 野獸工廠 =====
-function makePerson(coat, withClub) {
+// ===== 角色工廠（Q 版生還者：大頭、連帽厚外套、手套靴子、背包）=====
+const woodSlotMat = mat(0xb8884e);
+const stoneSlotMat = mat(0x9aa6b4);
+function makePerson(coat) {
   const g = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.CapsuleGeometry(5.5, 9, 4, 10), mat(coat));
-  body.position.y = 13; body.castShadow = true; g.add(body);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(5.5, 12, 10), mat(0xf2c9a0));
-  head.position.y = 26; head.castShadow = true; g.add(head);
-  const hat = new THREE.Mesh(new THREE.SphereGeometry(5.9, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2.1), mat(coat));
-  hat.position.y = 27; g.add(hat);
+  const bodyG = new THREE.Group();       // 可前傾（發抖/虛弱姿勢用）
+  g.add(bodyG);
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(5.8, 7, 4, 10), mat(coat));
+  body.position.y = 11.5; body.castShadow = true; bodyG.add(body);
+  // 大頭 Q 版
+  const head = new THREE.Mesh(new THREE.SphereGeometry(7, 14, 12), mat(0xf2c9a0));
+  head.position.y = 25; head.castShadow = true; bodyG.add(head);
+  const hood = new THREE.Mesh(new THREE.SphereGeometry(7.6, 14, 9, 0, Math.PI * 2, 0, Math.PI / 1.9), mat(coat));
+  hood.position.y = 26; bodyG.add(hood);
+  const hoodRim = new THREE.Mesh(new THREE.TorusGeometry(6.4, 1.4, 6, 14), mat(0xf4f8fc));
+  hoodRim.position.y = 25.5; hoodRim.rotation.x = 0.35; bodyG.add(hoodRim);
+  // 手臂（手套）
   const arms = {};
   for (const side of [-1, 1]) {
     const pivot = new THREE.Group();
-    pivot.position.set(side * 7, 21, 0);
-    const arm = new THREE.Mesh(new THREE.CapsuleGeometry(2.2, 8, 4, 8), mat(coat));
-    arm.position.y = -5; arm.castShadow = true;
+    pivot.position.set(side * 7.4, 18.5, 0);
+    const arm = new THREE.Mesh(new THREE.CapsuleGeometry(2.3, 7, 4, 8), mat(coat));
+    arm.position.y = -4.5; arm.castShadow = true;
     pivot.add(arm);
-    g.add(pivot);
+    const glove = new THREE.Mesh(new THREE.SphereGeometry(2.7, 8, 6), mat(0x5a4634));
+    glove.position.y = -10;
+    pivot.add(glove);
+    bodyG.add(pivot);
     arms[side] = pivot;
   }
-  if (withClub) {
-    // 紅色螺旋大棒（廣告同款）
-    const club = new THREE.Group();
-    for (let i = 0; i < 5; i++) {
-      const seg = new THREE.Mesh(new THREE.CylinderGeometry(2.6 + i * 0.28, 2.6 + (i + 1) * 0.28, 4.6, 8),
-        mat(i % 2 ? 0x8a1f28 : 0xb8333c));
-      seg.position.y = -(11 + i * 4.4);
-      seg.castShadow = true;
-      club.add(seg);
+  // 靴子
+  for (const side of [-1, 1]) {
+    const boot = new THREE.Mesh(new THREE.BoxGeometry(4.4, 4, 6), mat(0x4a3826));
+    boot.position.set(side * 3.4, 2, 1);
+    boot.castShadow = true;
+    g.add(boot);
+  }
+  // 背包 + 可見的資源堆
+  const pack = new THREE.Mesh(new THREE.BoxGeometry(9.5, 11, 5), mat(0x8a6b46));
+  pack.position.set(0, 14, -6.5); pack.castShadow = true; bodyG.add(pack);
+  const packStrap = new THREE.Mesh(new THREE.BoxGeometry(10.5, 2.4, 5.6), mat(0x5a4634));
+  packStrap.position.set(0, 16, -6.5); bodyG.add(packStrap);
+  const slots = [];
+  const slotGeo = new THREE.CylinderGeometry(1.9, 1.9, 8.6, 6);
+  for (let i = 0; i < 12; i++) {
+    const slot = new THREE.Mesh(slotGeo, woodSlotMat);
+    slot.rotation.z = Math.PI / 2;
+    slot.position.set(0, 20.5 + Math.floor(i / 3) * 3.6, -6.5 + (i % 3) * 0 - 0);
+    slot.position.x = (i % 3 - 1) * 0;
+    slot.position.set((i % 2 ? 2.2 : -2.2) * ((Math.floor(i / 2) % 2) ? 1 : .5), 20.5 + Math.floor(i / 4) * 3.8, -6.5);
+    slot.visible = false;
+    bodyG.add(slot);
+    slots.push(slot);
+  }
+  // 工具（依動作自動出現）
+  const axe = new THREE.Group();
+  {
+    const handle = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 15, 6), mat(0x8a6b46));
+    handle.position.y = -6; axe.add(handle);
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(2, 5.5, 7.5), mat(0xc2cad4));
+    blade.position.set(0, -13, 3); axe.add(blade);
+  }
+  axe.visible = false;
+  arms[1].add(axe);
+  const pick = new THREE.Group();
+  {
+    const handle = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 15, 6), mat(0x8a6b46));
+    handle.position.y = -6; pick.add(handle);
+    for (const side of [-1, 1]) {
+      const headP = new THREE.Mesh(new THREE.BoxGeometry(1.8, 2.4, 8), mat(0xb0bac6));
+      headP.position.set(0, -13, side * 4);
+      headP.rotation.x = side * 0.5;
+      pick.add(headP);
     }
-    arms[1].add(club);
   }
-  g.userData = { armL: arms[-1], armR: arms[1] };
+  pick.visible = false;
+  arms[1].add(pick);
+
+  g.userData = { bodyG, body, armL: arms[-1], armR: arms[1], slots, axe, pick };
   return g;
 }
 
-function makeBear(s) {
-  const g = new THREE.Group();
-  const bodyMat = new THREE.MeshLambertMaterial({ color: 0xf4f6f0 });
-  const body = new THREE.Mesh(new THREE.SphereGeometry(12, 14, 12), bodyMat);
-  body.scale.set(1.35, 1.05, 1.8);
-  body.position.y = 16; body.castShadow = true; g.add(body);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(7.5, 12, 10), bodyMat);
-  head.position.set(0, 19, 20); head.castShadow = true; g.add(head);
-  const snout = new THREE.Mesh(new THREE.SphereGeometry(3.6, 8, 8), bodyMat);
-  snout.position.set(0, 17, 26.5); g.add(snout);
-  const dark = mat(0x2a2e34);
-  const nose = new THREE.Mesh(new THREE.SphereGeometry(1.7, 8, 6), dark);
-  nose.position.set(0, 17.6, 29.5); g.add(nose);
-  for (const sx of [-3.6, 3.6]) {
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(1.2, 6, 6), dark);
-    eye.position.set(sx, 21, 26); g.add(eye);
-  }
-  for (const sx of [-5, 5]) {
-    const ear = new THREE.Mesh(new THREE.SphereGeometry(2.6, 8, 6), bodyMat);
-    ear.position.set(sx, 25.5, 17); g.add(ear);
-  }
-  const legs = [];
-  for (const [lx, lz] of [[-9, 10], [9, 10], [-9, -10], [9, -10]]) {
-    const leg = new THREE.Mesh(new THREE.CylinderGeometry(3.4, 3.8, 12, 7), bodyMat);
-    leg.position.set(lx, 6, lz); leg.castShadow = true;
-    g.add(leg); legs.push(leg);
-  }
-  g.scale.setScalar(s);
-  g.userData = { legs, flashMat: bodyMat };
-  return g;
+// 冰封生還者的冰塊
+function makeIceBlock() {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(20, 32, 18),
+    new THREE.MeshLambertMaterial({ color: 0x6ec0f0, transparent: true, opacity: 0.72, emissive: 0x1a5a8a, emissiveIntensity: .45 }));
+  m.position.y = 16;
+  m.castShadow = true;
+  return m;
 }
 
-function makeMeatMesh() {
-  const g = new THREE.Group();
-  const m = new THREE.Mesh(new THREE.SphereGeometry(5, 8, 7), mat(0xd4504a));
-  m.scale.set(1.3, 0.75, 1);
-  m.castShadow = true; g.add(m);
-  const fat = new THREE.Mesh(new THREE.SphereGeometry(2.6, 7, 6), mat(0xf0b8b2));
-  fat.position.set(2, 2.2, 0); g.add(fat);
-  const bone = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 8, 6), mat(0xf6f2ea));
-  bone.rotation.z = Math.PI / 2; bone.position.set(-6, 0, 0); g.add(bone);
-  return g;
+// 資源小物件
+function makeItemMesh(type) {
+  if (type === 'wood') {
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(2.4, 2.4, 10, 6), mat(0xb8884e));
+    m.rotation.z = Math.PI / 2;
+    m.castShadow = true;
+    return m;
+  }
+  const m = new THREE.Mesh(new THREE.DodecahedronGeometry(3.4, 0), mat(0x9aa6b4));
+  m.castShadow = true;
+  return m;
 }
 
-// 動態實體容器
+// 動態容器
 const dyn = new THREE.Group();
 scene.add(dyn);
 
-// 營地外等待的紅衣生還者（裝飾）
-const waiters = [];
-for (const [x, y] of [[60, 1700], [352, 1688], [400, 1860]]) {
-  const m = makePerson(0xa8423c, false);
-  m.position.set(wx(x), 0, y);
-  m.rotation.y = Math.PI + (Math.random() - .5);
-  scene.add(m);
-  waiters.push(m);
+// 腳印池
+const footprints = [];
+const fpGeo = new THREE.PlaneGeometry(4.6, 7);
+const FP_N = 46;
+for (let i = 0; i < FP_N; i++) {
+  const fp = new THREE.Mesh(fpGeo, new THREE.MeshBasicMaterial({ color: 0xaec4d8, transparent: true, opacity: 0, depthWrite: false }));
+  fp.rotation.x = -Math.PI / 2;
+  fp.position.y = 0.4;
+  scene.add(fp);
+  footprints.push({ mesh: fp, life: 0 });
 }
+let fpIdx = 0, fpTimer = 0, fpSide = 1;
 
-// 雪花粒子
+// 雪花
 const SNOW_N = 1100;
 const snowGeo = new THREE.BufferGeometry();
 const snowPos = new Float32Array(SNOW_N * 3);
 const snowVel = new Float32Array(SNOW_N);
 for (let i = 0; i < SNOW_N; i++) {
-  snowPos[i * 3] = -300 + Math.random() * 600;
+  snowPos[i * 3] = -480 + Math.random() * 960;
   snowPos[i * 3 + 1] = Math.random() * 500;
   snowPos[i * 3 + 2] = Math.random() * 2400;
   snowVel[i] = 35 + Math.random() * 55;
 }
 snowGeo.setAttribute('position', new THREE.BufferAttribute(snowPos, 3));
-const snowPts = new THREE.Points(snowGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 4, transparent: true, opacity: .85 }));
-scene.add(snowPts);
+scene.add(new THREE.Points(snowGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 4, transparent: true, opacity: .85 })));
 
 // ============ 視窗 / 投影 ============
 let uiW = 0, uiH = 0, safeTop = 0, safeBot = 0;
@@ -535,10 +555,7 @@ function resize() {
   const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
   const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
   uiW = vw; uiH = vh;
-  if (renderer) {
-    renderer.setPixelRatio(dpr);
-    renderer.setSize(vw, vh, true);
-  }
+  if (renderer) { renderer.setPixelRatio(dpr); renderer.setSize(vw, vh, true); }
   camera.aspect = vw / vh;
   camera.updateProjectionMatrix();
   uiCanvas.width = Math.round(vw * dpr);
@@ -563,42 +580,40 @@ function toScreen(x, h, z) {
 
 reset();
 
-// ============ 柵欄碰撞 ============
-function clampToWalls(o, r) {
-  if (o.y > CAMP.top - r && o.y < CAMP.top + r && (o.x < GATE.x0 + r || o.x > GATE.x1 - r)) {
-    o.y = o.y < CAMP.top ? CAMP.top - r : CAMP.top + r;
-  }
-  if (o.y > CAMP.top) {
-    if (o.x < CAMP.left + r) o.x = CAMP.left + r;
-    if (o.x > CAMP.right - r) o.x = CAMP.right - r;
-    if (o.y > CAMP.bot - r) o.y = CAMP.bot - r;
-  }
-  o.x = Math.max(14, Math.min(WORLD_W - 14, o.x));
-  o.y = Math.max(60, Math.min(2280, o.y));
-}
-
-// 角度平滑（最短弧）
 function lerpAngle(a, b, t) {
   const d = ((b - a + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
   return a + d * Math.min(1, t);
 }
 
 // ============ 遊戲邏輯 ============
+function carried() { return state.player.carryWood + state.player.carryStone; }
+function coldLevel() { return state.warmth < 15 ? 2 : (state.warmth < 40 ? 1 : 0); }
+
+function spawnItem(type, x, y, toPlayer) {
+  const a = Math.random() * 6.28;
+  state.items.push({
+    type, x, y, h: 14,
+    vx: Math.cos(a) * 50, vy: Math.sin(a) * 50, vh: 90 + Math.random() * 60,
+    fly: !!toPlayer, t: 0, fx0: x, fy0: y, fh0: 14, ground: !toPlayer
+  });
+}
+
 function update(dt) {
   if (state.phase !== 'play') return;
   state.time += dt;
   const pl = state.player;
 
-  // --- 被擊倒 ---
-  if (pl.deadT > 0) {
-    pl.deadT -= dt;
+  // --- 凍倒 ---
+  if (pl.collapseT > 0) {
+    pl.collapseT -= dt;
     pl.vx = pl.vy = 0;
-    if (pl.deadT <= 0) {
-      pl.x = 210; pl.y = 2050; pl.hp = playerMaxHp();
-      addFloat(pl.x, pl.y, 40, '在營火旁甦醒', '#aee2ff');
+    if (pl.collapseT <= 0) {
+      pl.x = FURNACE.x; pl.y = FURNACE.y + 80;
+      state.warmth = 65;
+      addFloat(pl.x, pl.y, 40, '在火爐邊甦醒', '#aee2ff');
     }
   } else {
-    // --- 平滑移動（速度緩動 + 類比搖桿強度）---
+    // --- 移動（單指搖桿類比 + 載重/寒冷影響）---
     let mx = 0, my = 0;
     if (keys['w'] || keys['arrowup']) my -= 1;
     if (keys['s'] || keys['arrowdown']) my += 1;
@@ -606,222 +621,279 @@ function update(dt) {
     if (keys['d'] || keys['arrowright']) mx += 1;
     if (joy) {
       const d = Math.hypot(joy.dx, joy.dy);
-      if (d > 6) {
-        const k = Math.min(1, d / 60);
-        mx = joy.dx / d * k; my = joy.dy / d * k;
-      }
+      if (d > 6) { const k = Math.min(1, d / 60); mx = joy.dx / d * k; my = joy.dy / d * k; }
     }
     const ml = Math.hypot(mx, my);
     if (ml > 1) { mx /= ml; my /= ml; }
+    const moving = ml > 0.15;
+    const loadF = 1 - 0.28 * (carried() / bagCap());
+    const coldF = coldLevel() === 2 ? 0.55 : (coldLevel() === 1 ? 0.85 : 1);
+    const SP = 175 * loadF * coldF;
     const ease = 1 - Math.exp(-11 * dt);
-    pl.vx += (mx * PLAYER_SPEED - pl.vx) * ease;
-    pl.vy += (my * PLAYER_SPEED - pl.vy) * ease;
-    pl.x += pl.vx * dt;
-    pl.y += pl.vy * dt;
-    clampToWalls(pl, 12);
+    pl.vx += (mx * SP - pl.vx) * ease;
+    pl.vy += (my * SP - pl.vy) * ease;
+    pl.x = Math.max(24, Math.min(WORLD_W - 24, pl.x + pl.vx * dt));
+    pl.y = Math.max(70, Math.min(WORLD_H - 70, pl.y + pl.vy * dt));
     const spd = Math.hypot(pl.vx, pl.vy);
     if (spd > 15) {
       pl.walk += spd * dt * 0.075;
       pl.heading = lerpAngle(pl.heading, Math.atan2(pl.vx, pl.vy), 14 * dt);
+      // 腳印
+      fpTimer -= dt;
+      if (fpTimer <= 0) {
+        fpTimer = 0.16;
+        fpSide = -fpSide;
+        const fp = footprints[fpIdx++ % FP_N];
+        const px = Math.cos(pl.heading), pz = -Math.sin(pl.heading);
+        fp.mesh.position.set(wx(pl.x) + px * fpSide * 3.4, 0.4, pl.y + pz * fpSide * 3.4);
+        fp.mesh.rotation.z = -pl.heading;
+        fp.life = 1;
+      }
     }
 
-    // --- 自動攻擊（揮擊動畫 + 衝步 + 延遲命中）---
-    pl.atkCd -= dt;
-    if (pl.swing > 0) pl.swing = Math.max(0, pl.swing - dt / 0.3);
-    let target = null, td = 1e9;
-    for (const b of state.bears) {
-      if (b.state === 'dead') continue;
-      const d = Math.hypot(b.x - pl.x, b.y - pl.y) - b.size * 22;
-      if (d < td) { td = d; target = b; }
+    // --- 自動互動（靠近即動作；移動會中斷）---
+    if (moving) { pl.action = null; }
+    else if (!pl.action) {
+      let best = null;
+      for (const tr of state.trees) {
+        if (tr.hp <= 0) continue;
+        const d = Math.hypot(tr.x - pl.x, tr.y - pl.y);
+        if (d < 42 && (!best || d < best.d)) best = { type: 'chop', t: tr, d };
+      }
+      for (const rk of state.rocks) {
+        if (rk.hp <= 0) continue;
+        const d = Math.hypot(rk.x - pl.x, rk.y - pl.y);
+        if (d < 42 && (!best || d < best.d)) best = { type: 'mine', t: rk, d };
+      }
+      for (const sv of state.survivors) {
+        if (sv.state !== 'frozen') continue;
+        const d = Math.hypot(sv.x - pl.x, sv.y - pl.y);
+        if (d < 42 && (!best || d < best.d)) best = { type: 'rescue', t: sv, d };
+      }
+      if (best) {
+        pl.action = { type: best.type, target: best.t, t: 0 };
+        pl.heading = Math.atan2(best.t.x - pl.x, best.t.y - pl.y);
+        pl.hitT = 0;
+      }
     }
-    if (target && td < 58 && pl.atkCd <= 0) {
-      pl.atkCd = 0.42;
-      pl.swing = 1;
-      const dx = target.x - pl.x, dy = target.y - pl.y, d = Math.hypot(dx, dy) || 1;
-      pl.heading = Math.atan2(dx, dy);
-      pl.vx += dx / d * 110;   // 小衝步
-      pl.vy += dy / d * 110;
-      pl.pendingHit = { b: target, t: 0.1 };
-      beep(420, .05, 'triangle', .04);
-    }
-    if (pl.pendingHit) {
-      pl.pendingHit.t -= dt;
-      if (pl.pendingHit.t <= 0) {
-        const b = pl.pendingHit.b;
-        pl.pendingHit = null;
-        if (b.state !== 'dead' && Math.hypot(b.x - pl.x, b.y - pl.y) < b.size * 22 + 85) {
-          hitBear(b, playerDmg(), pl);
+    if (pl.action) {
+      const A = pl.action;
+      const tgt = A.target;
+      const gone = (A.type === 'chop' && tgt.hp <= 0) || (A.type === 'mine' && tgt.hp <= 0) ||
+                   (A.type === 'rescue' && tgt.state !== 'frozen') ||
+                   Math.hypot(tgt.x - pl.x, tgt.y - pl.y) > 52;
+      if (gone) pl.action = null;
+      else if (A.type === 'rescue') {
+        tgt.rescueT += dt;
+        if (tgt.rescueT >= 2) {
+          tgt.state = 'follow';
+          state.rescued++;
+          burstAt(tgt.x, tgt.y, 20, '#bfe8ff', 16, 120);
+          addFloat(tgt.x, tgt.y, 40, '🙌 生還者獲救！', '#7affc8', 17);
+          beep(700, .1, 'sine', .06); beep(1050, .2, 'sine', .06);
+          pl.action = null;
+          checkWin();
+        }
+      } else {
+        const interval = (A.type === 'chop' ? 0.52 : 0.62) / gatherSpeed();
+        pl.hitT += dt;
+        if (pl.hitT >= interval) {
+          pl.hitT = 0;
+          if (carried() >= bagCap()) {
+            addFloat(pl.x, pl.y, 42, '🎒 背包滿了！回火爐存放', '#ffd24a', 14);
+            beep(200, .1, 'sawtooth', .04);
+            pl.action = null;
+          } else {
+            tgt.hp--; tgt.shake = 0.22;
+            if (A.type === 'chop') {
+              spawnItem('wood', tgt.x, tgt.y, true);
+              burstAt(tgt.x, tgt.y, 26, '#b8884e', 6);
+              beep(300 + Math.random() * 60, .06, 'triangle', .05);
+              state.chopped++;
+              if (tgt.hp <= 0) { tgt.fallT = 0.001; tgt.respawnT = 20; spawnItem('wood', tgt.x, tgt.y, true); }
+            } else {
+              spawnItem('stone', tgt.x, tgt.y, true);
+              burstAt(tgt.x, tgt.y, 16, '#aab6c4', 6);
+              beep(520 + Math.random() * 80, .05, 'square', .04);
+              state.mined++;
+              if (tgt.hp <= 0) { tgt.respawnT = 24; spawnItem('stone', tgt.x, tgt.y, true); }
+            }
+          }
         }
       }
     }
 
-    // --- 營火回血 ---
-    const fire = state.stations.fire;
-    if (Math.hypot(pl.x - fire.x, pl.y - fire.y) < 95 && pl.hp < playerMaxHp()) {
-      pl.hp = Math.min(playerMaxHp(), pl.hp + healRate() * dt);
+    // --- 存放資源（靠近火爐自動）---
+    const df = Math.hypot(pl.x - FURNACE.x, pl.y - FURNACE.y);
+    if (df < 80 && carried() > 0) {
+      pl.depositT -= dt;
+      if (pl.depositT <= 0) {
+        pl.depositT = 0.07;
+        if (pl.carryWood > 0) { pl.carryWood--; state.wood++; addFloat(pl.x, pl.y, 44, '+1 🪵', '#e8c98a', 13); }
+        else { pl.carryStone--; state.stone++; addFloat(pl.x, pl.y, 44, '+1 🪨', '#cdd6e0', 13); }
+        beep(880 + Math.random() * 200, .04, 'sine', .035);
+      }
+    }
+
+    // --- 溫暖度 ---
+    if (df < warmRadius()) {
+      state.warmth = Math.min(100, state.warmth + 30 * dt);
+    } else {
+      const drain = 2.2 + Math.min(5.5, (df - warmRadius()) / 200);
+      state.warmth -= drain * dt;
+      if (state.warmth <= 0) {
+        state.warmth = 0;
+        collapse();
+      }
     }
   }
-  pl.hurtFlash -= dt;
 
-  // --- 野獸 AI（速度平滑 + 擊退衰減）---
-  for (const b of state.bears) {
-    if (b.state === 'dead') {
-      b.deadT += dt;
-      if (b.tier < 2) {
-        b.respawnT -= dt;
-        if (b.respawnT <= 0) {
-          const mesh = b.mesh;
-          Object.assign(b, spawnBear({ x: b.hx, y: b.hy, tier: b.tier }));
-          b.mesh = mesh;
-          if (mesh) { mesh.visible = true; mesh.rotation.z = 0; }
+  // --- 建設圈 ---
+  for (const key in state.rings) {
+    const r = state.rings[key];
+    const lvNow = key === 'furnace' ? state.furnaceLv - 1 : (key === 'bag' ? state.bagLv : state.toolLv);
+    if (lvNow >= r.costs.length) continue;
+    if (pl.collapseT <= 0 && Math.hypot(pl.x - r.x, pl.y - r.y) < 44 && state[r.res] > 0) {
+      const cost = r.costs[lvNow];
+      const paid = state.paid[key] || 0;
+      const pay = Math.min(state[r.res], 14 * dt, cost - paid);
+      if (pay > 0) {
+        state[r.res] -= pay;
+        state.paid[key] = paid + pay;
+        if (state.paid[key] >= cost - 0.01) {
+          state.paid[key] = 0;
+          applyUpgrade(key);
         }
       }
+    }
+  }
+
+  // --- 樹 / 礦重生 ---
+  for (const tr of state.trees) {
+    if (tr.shake > 0) tr.shake -= dt;
+    if (tr.hp <= 0) {
+      if (tr.fallT > 0 && tr.fallT < 1.2) tr.fallT += dt;
+      tr.respawnT -= dt;
+      if (tr.respawnT <= 0) { tr.hp = tr.maxHp; tr.fallT = 0; tr.popT = 0.5; }
+    }
+    if (tr.popT > 0) tr.popT -= dt;
+  }
+  for (const rk of state.rocks) {
+    if (rk.shake > 0) rk.shake -= dt;
+    if (rk.hp <= 0) {
+      rk.respawnT -= dt;
+      if (rk.respawnT <= 0) { rk.hp = rk.maxHp; rk.popT = 0.5; }
+    }
+    if (rk.popT > 0) rk.popT -= dt;
+  }
+
+  // --- 生還者：跟隨 → 抵達營地變幫手 ---
+  for (const sv of state.survivors) {
+    if (sv.state === 'frozen') {
+      if (sv.rescueT > 0 && (!pl.action || pl.action.target !== sv)) sv.rescueT = Math.max(0, sv.rescueT - dt * 2);
       continue;
     }
-    b.atkCd -= dt; b.hitFlash -= dt;
-    const t = TIER[b.tier];
-    const dp = Math.hypot(pl.x - b.x, pl.y - b.y);
-    const range = 30 + b.size * 24;
-    let dvx = 0, dvy = 0;
-
-    if (b.state === 'idle') {
-      if (dp < t.aggro && pl.deadT <= 0 && pl.y < CAMP.top) { b.state = 'chase'; addFloat(b.x, b.y, 52 * b.size, '❗', '#ff8a8a', 18); }
-      else {
-        b.wanderT -= dt;
-        if (b.wanderT <= 0) {
-          b.wanderT = 1.5 + Math.random() * 2.5;
-          b.tx = b.hx + (Math.random() - .5) * 110;
-          b.ty = b.hy + (Math.random() - .5) * 110;
+    let tx = sv.x, ty = sv.y, spdT = 150;
+    if (sv.state === 'follow') {
+      tx = pl.x - Math.sin(pl.heading) * 30; ty = pl.y - Math.cos(pl.heading) * 30;
+      if (Math.hypot(sv.x - FURNACE.x, sv.y - FURNACE.y) < warmRadius() * 0.8) {
+        sv.state = 'helper'; sv.task = 'warm'; sv.taskT = 2;
+        addFloat(sv.x, sv.y, 40, '🤝 加入營地，幫忙砍柴！', '#7ad4ff', 15);
+      }
+    } else if (sv.state === 'helper') {
+      // 幫手循環：取暖 → 砍樹 → 揹回火爐
+      if (sv.task === 'warm') {
+        tx = FURNACE.x + 40; ty = FURNACE.y + 40;
+        sv.taskT -= dt;
+        if (sv.taskT <= 0) {
+          let best = null, bd = 1e9;
+          for (const tr of state.trees) {
+            if (tr.hp <= 0) continue;
+            const d = Math.hypot(tr.x - FURNACE.x, tr.y - FURNACE.y);
+            if (d < 430 && d < bd) { bd = d; best = tr; }
+          }
+          if (best) { sv.task = 'chop'; sv.target = best; sv.taskT = 0; }
+          else sv.taskT = 2;
         }
-        const dx = b.tx - b.x, dy = b.ty - b.y, d = Math.hypot(dx, dy);
-        if (d > 8) { dvx = dx / d * t.speed * .4; dvy = dy / d * t.speed * .4; }
-      }
-    } else if (b.state === 'chase') {
-      if (dp > t.aggro + 180 || pl.deadT > 0 || pl.y > CAMP.top) b.state = 'return';
-      else if (dp > range) {
-        dvx = (pl.x - b.x) / dp * t.speed;
-        dvy = (pl.y - b.y) / dp * t.speed;
-      }
-      if (dp < range + 8 && b.atkCd <= 0 && pl.deadT <= 0) {
-        b.atkCd = 1.05;
-        pl.hp -= t.dmg;
-        pl.hurtFlash = 0.3;
-        state.shake = 0.22;
-        const nx = (pl.x - b.x) / (dp || 1), ny = (pl.y - b.y) / (dp || 1);
-        pl.vx += nx * 150; pl.vy += ny * 150;   // 玩家被擊退
-        burstAt(pl.x, pl.y, 26, '#ff6a5a', 8);
-        addFloat(pl.x, pl.y, 38, '-' + t.dmg, '#ff8a8a', 15);
-        beep(170, .12, 'sawtooth', .06);
-        if (pl.hp <= 0) playerDown();
-      }
-    } else if (b.state === 'return') {
-      const dx = b.hx - b.x, dy = b.hy - b.y, d = Math.hypot(dx, dy);
-      b.hp = Math.min(b.maxHp, b.hp + b.maxHp * 0.06 * dt);
-      if (d < 10) b.state = 'idle';
-      else { dvx = dx / d * t.speed * .8; dvy = dy / d * t.speed * .8; }
-      if (dp < t.aggro * .8 && pl.deadT <= 0 && pl.y < CAMP.top) b.state = 'chase';
-    }
-
-    const bease = 1 - Math.exp(-6 * dt);
-    b.vx += (dvx - b.vx) * bease;
-    b.vy += (dvy - b.vy) * bease;
-    b.x += (b.vx + b.kx) * dt;
-    b.y += (b.vy + b.ky) * dt;
-    const kd = Math.exp(-7 * dt);
-    b.kx *= kd; b.ky *= kd;
-    if (b.y > CAMP.top - 28) b.y = CAMP.top - 28;   // 進不了營地
-    const bspd = Math.hypot(b.vx, b.vy);
-    if (bspd > 10) {
-      b.walk += bspd * dt * 0.09;
-      b.heading = lerpAngle(b.heading, Math.atan2(b.vx, b.vy), 8 * dt);
-    }
-  }
-
-  // --- 夥伴 AI ---
-  for (let i = 0; i < state.followers.length; i++) {
-    const f = state.followers[i];
-    f.atkCd -= dt;
-    if (f.swing > 0) f.swing = Math.max(0, f.swing - dt / 0.3);
-    let tg = null, tdd = 1e9;
-    for (const b of state.bears) {
-      if (b.state === 'dead') continue;
-      const d = Math.hypot(b.x - f.x, b.y - f.y);
-      if (d < 160 && d < tdd) { tdd = d; tg = b; }
-    }
-    let tx, ty;
-    if (tg) {
-      const range = 26 + tg.size * 24;
-      if (tdd > range) { tx = tg.x; ty = tg.y; }
-      else {
-        tx = f.x; ty = f.y;
-        if (f.atkCd <= 0) {
-          f.atkCd = 0.75; f.swing = 1;
-          f.heading = Math.atan2(tg.x - f.x, tg.y - f.y);
-          hitBear(tg, 5 + state.stations.anvil.lv * 4, f);
+      } else if (sv.task === 'chop') {
+        const tr = sv.target;
+        if (!tr || tr.hp <= 0) {
+          sv.task = sv.carry > 0 ? 'return' : 'warm'; sv.taskT = 1;
+        } else {
+          const d = Math.hypot(tr.x - sv.x, tr.y - sv.y);
+          if (d > 36) { tx = tr.x; ty = tr.y; }
+          else {
+            tx = sv.x; ty = sv.y;
+            sv.heading = Math.atan2(tr.x - sv.x, tr.y - sv.y);
+            sv.taskT += dt;
+            sv.swing = (sv.taskT % 0.9) / 0.9;
+            if (sv.taskT >= 0.9) {
+              sv.taskT = 0;
+              tr.hp--; tr.shake = 0.2;
+              sv.carry++;
+              burstAt(tr.x, tr.y, 26, '#b8884e', 4);
+              if (tr.hp <= 0) { tr.fallT = 0.001; tr.respawnT = 20; }
+              if (sv.carry >= 4) sv.task = 'return';
+            }
+          }
+        }
+      } else if (sv.task === 'return') {
+        tx = FURNACE.x + 30; ty = FURNACE.y + 50;
+        if (Math.hypot(sv.x - FURNACE.x, sv.y - FURNACE.y) < 80) {
+          state.wood += sv.carry;
+          addFloat(sv.x, sv.y, 40, '+' + sv.carry + ' 🪵', '#e8c98a', 14);
+          sv.carry = 0;
+          sv.task = 'warm'; sv.taskT = 1.2;
+          beep(760, .07, 'sine', .04);
         }
       }
-    } else {
-      const lead = i === 0 ? pl : state.followers[i - 1];
-      tx = lead.x - Math.sin(i * 2.1) * 28; ty = lead.y + 26 + i * 4;
     }
-    const dx = tx - f.x, dy = ty - f.y, d = Math.hypot(dx, dy);
-    const want = d > 26;
+    const dx = tx - sv.x, dy = ty - sv.y, d = Math.hypot(dx, dy);
+    const want = d > 14;
     const fease = 1 - Math.exp(-9 * dt);
-    f.vx += ((want ? dx / d * 150 : 0) - f.vx) * fease;
-    f.vy += ((want ? dy / d * 150 : 0) - f.vy) * fease;
-    f.x += f.vx * dt; f.y += f.vy * dt;
-    const fspd = Math.hypot(f.vx, f.vy);
+    sv.vx += ((want ? dx / d * spdT : 0) - sv.vx) * fease;
+    sv.vy += ((want ? dy / d * spdT : 0) - sv.vy) * fease;
+    sv.x += sv.vx * dt; sv.y += sv.vy * dt;
+    const fspd = Math.hypot(sv.vx, sv.vy);
     if (fspd > 15) {
-      f.walk += fspd * dt * 0.075;
-      f.heading = lerpAngle(f.heading, Math.atan2(f.vx, f.vy), 12 * dt);
+      sv.walk += fspd * dt * 0.075;
+      sv.heading = lerpAngle(sv.heading, Math.atan2(sv.vx, sv.vy), 12 * dt);
     }
   }
 
-  // --- 肉塊（拋物落地 → 吸附飛向玩家）---
-  for (const m of state.meats) {
-    if (!m.fly) {
-      m.x += m.vx * dt; m.y += m.vy * dt;
-      m.vx *= Math.exp(-2.5 * dt); m.vy *= Math.exp(-2.5 * dt);
-      m.vh -= 420 * dt;
-      m.h += m.vh * dt;
-      if (m.h <= 0) { m.h = 0; m.vh = -m.vh * 0.35; if (Math.abs(m.vh) < 30) m.vh = 0; }
-      if (pl.deadT <= 0 && Math.hypot(pl.x - m.x, pl.y - m.y) < 58) {
-        m.fly = true; m.t = 0; m.fx0 = m.x; m.fy0 = m.y; m.fh0 = m.h;
+  // --- 資源小物件 ---
+  for (const it of state.items) {
+    if (it.fly) {
+      it.t += dt * 3.4;
+      if (it.t >= 1) {
+        it.done = true;
+        if (carried() < bagCap()) {
+          if (it.type === 'wood') pl.carryWood++; else pl.carryStone++;
+          beep(980 + Math.random() * 250, .04, 'sine', .04);
+        } else {
+          // 沒位置 → 掉在地上
+          state.items.push({ type: it.type, x: pl.x + (Math.random() - .5) * 30, y: pl.y + 20 + Math.random() * 14, h: 0, vx: 0, vy: 0, vh: 0, fly: false, ground: true, t: 0 });
+        }
+      } else {
+        it.x = it.fx0 + (pl.x - it.fx0) * it.t;
+        it.y = it.fy0 + (pl.y - it.fy0) * it.t;
+        it.h = it.fh0 + (22 - it.fh0) * it.t + Math.sin(it.t * Math.PI) * 14;
       }
     } else {
-      m.t += dt * 3.6;
-      if (m.t >= 1) { m.done = true; state.meat += MEAT_VAL; beep(980 + Math.random() * 250, .05, 'sine', .04); }
-      else {
-        m.x = m.fx0 + (pl.x - m.fx0) * m.t;
-        m.y = m.fy0 + (pl.y - m.fy0) * m.t;
-        m.h = m.fh0 + (24 - m.fh0) * m.t + Math.sin(m.t * Math.PI) * 18;
+      it.x += it.vx * dt; it.y += it.vy * dt;
+      it.vx *= Math.exp(-2.5 * dt); it.vy *= Math.exp(-2.5 * dt);
+      it.vh -= 380 * dt;
+      it.h += it.vh * dt;
+      if (it.h <= 0) { it.h = 0; it.vh = -it.vh * 0.3; if (Math.abs(it.vh) < 25) it.vh = 0; }
+      if (pl.collapseT <= 0 && carried() < bagCap() && Math.hypot(pl.x - it.x, pl.y - it.y) < 46) {
+        it.fly = true; it.t = 0; it.fx0 = it.x; it.fy0 = it.y; it.fh0 = it.h;
       }
     }
   }
-  for (const m of state.meats) {
-    if (m.done && m.mesh) { dyn.remove(m.mesh); m.mesh = null; }
+  for (const it of state.items) {
+    if (it.done && it.mesh) { dyn.remove(it.mesh); it.mesh = null; }
   }
-  state.meats = state.meats.filter(m => !m.done);
-
-  // --- 建設站 ---
-  for (const key in state.stations) {
-    const st = state.stations[key];
-    if (st.lv >= st.costs.length) continue;
-    if (pl.deadT <= 0 && Math.hypot(pl.x - st.x, pl.y - st.y) < 52 && state.meat > 0) {
-      const cost = st.costs[st.lv];
-      const paid = state.stPaid[key] || 0;
-      const pay = Math.min(state.meat, 26 * dt, cost - paid);
-      if (pay > 0) {
-        state.meat -= pay;
-        state.stPaid[key] = paid + pay;
-        if (state.stPaid[key] >= cost - 0.01) {
-          state.stPaid[key] = 0;
-          st.lv++;
-          applyStation(key);
-        }
-      }
-    }
-  }
+  state.items = state.items.filter(it => !it.done);
 
   if (state.shake > 0) state.shake -= dt;
 
@@ -838,90 +910,83 @@ function update(dt) {
   }
 }
 
-function hitBear(b, dmg, from) {
-  b.hp -= dmg;
-  b.hitFlash = 0.18;
-  if (b.state === 'idle' || b.state === 'return') b.state = 'chase';
-  const d = Math.hypot(b.x - from.x, b.y - from.y) || 1;
-  b.kx += (b.x - from.x) / d * 170 / b.size;
-  b.ky += (b.y - from.y) / d * 170 / b.size;
-  burstAt(b.x, b.y, 24 * b.size, '#ffd24a', 7);
-  addFloat(b.x, b.y, 46 * b.size, '-' + dmg, '#ffd24a', 15);
-  beep(260 + Math.random() * 60, .06, 'square', .05);
-  if (b.hp <= 0) {
-    b.state = 'dead'; b.deadT = 0; b.respawnT = 26;
-    state.kills++;
-    const t = TIER[b.tier];
-    for (let i = 0; i < t.meat; i++) {
-      const a = Math.random() * 6.28;
-      state.meats.push({
-        x: b.x, y: b.y, h: 20, vx: Math.cos(a) * (40 + Math.random() * 90), vy: Math.sin(a) * (40 + Math.random() * 90),
-        vh: 120 + Math.random() * 120, fly: false, t: 0
-      });
-    }
-    burstAt(b.x, b.y, 20 * b.size, '#ffffff', 16, 130);
-    beep(140, .25, 'sawtooth', .06);
-    if (b.tier === 2) {
-      state.phase = 'win';
-      beep(660, .2, 'sine', .08); beep(880, .25, 'sine', .08); beep(1100, .4, 'sine', .08);
-    } else {
-      addFloat(b.x, b.y, 40, '🥩 獵物倒下！', '#ffb14a', 17);
-    }
-  }
-}
-
-function playerDown() {
+function collapse() {
   const pl = state.player;
-  pl.hp = 0;
-  pl.deadT = 2.2;
-  state.deaths++;
-  const drop = Math.floor(state.meat * 0.3 / MEAT_VAL);
-  state.meat -= drop * MEAT_VAL;
-  for (let i = 0; i < Math.min(drop, 20); i++) {
-    const a = Math.random() * 6.28;
-    state.meats.push({ x: pl.x, y: pl.y, h: 16, vx: Math.cos(a) * 130, vy: Math.sin(a) * 130, vh: 140, fly: false, t: 0 });
-  }
-  addFloat(pl.x, pl.y, 40, '💫 你被擊倒了！', '#ff8a8a', 18);
+  pl.collapseT = 2.4;
+  state.collapses++;
+  pl.action = null;
+  // 掉落一半攜帶資源
+  const dropW = Math.ceil(pl.carryWood / 2), dropS = Math.ceil(pl.carryStone / 2);
+  pl.carryWood -= dropW; pl.carryStone -= dropS;
+  for (let i = 0; i < dropW; i++) spawnItem('wood', pl.x, pl.y, false);
+  for (let i = 0; i < dropS; i++) spawnItem('stone', pl.x, pl.y, false);
+  addFloat(pl.x, pl.y, 40, '🥶 凍倒了…', '#9fd4ff', 18);
+  state.shake = 0.3;
   beep(120, .5, 'sawtooth', .07);
 }
 
-function applyStation(key) {
-  const st = state.stations[key];
-  if (key === 'fire') addFloat(st.x, st.y, 40, '🔥 營火更旺，回血加快！', '#ffb14a', 16);
-  else if (key === 'anvil') {
-    addFloat(st.x, st.y, 40, '⚒️ 武器強化！攻擊 ' + playerDmg(), '#ffd24a', 16);
-    burstAt(st.x, st.y, 20, '#ffd24a', 14);
-  } else if (key === 'tent') {
-    state.player.hp = playerMaxHp();
-    addFloat(st.x, st.y, 50, '⛺ 生命上限 ' + playerMaxHp() + '！', '#7aff9d', 16);
-  } else if (key === 'recruit') {
-    state.followers.push({ x: st.x, y: st.y + 24, vx: 0, vy: 0, heading: 0, walk: 0, atkCd: 0, swing: 0 });
-    addFloat(st.x, st.y, 40, '🤝 夥伴加入狩獵！', '#7ad4ff', 16);
+function applyUpgrade(key) {
+  if (key === 'furnace') {
+    state.furnaceLv++;
+    addFloat(FURNACE.x, FURNACE.y, 80, '🔥 火爐 Lv.' + state.furnaceLv + '！溫暖範圍擴大', '#ffb14a', 17);
+    burstAt(FURNACE.x, FURNACE.y, 70, '#ffb14a', 16);
+  } else if (key === 'bag') {
+    state.bagLv++;
+    addFloat(state.rings.bag.x, state.rings.bag.y, 40, '🎒 背包容量 ' + bagCap() + '！', '#7aff9d', 16);
+  } else if (key === 'tool') {
+    state.toolLv++;
+    addFloat(state.rings.tool.x, state.rings.tool.y, 40, '⚒️ 採集速度提升！', '#ffd24a', 16);
   }
   beep(660, .1, 'sine', .06); beep(990, .18, 'sine', .06);
+  checkWin();
+}
+
+function checkWin() {
+  if (state.furnaceLv >= FURNACE_MAX && state.rescued >= SURVIVOR_GOAL) {
+    state.phase = 'win';
+    beep(660, .2, 'sine', .08); beep(880, .25, 'sine', .08); beep(1100, .4, 'sine', .08);
+  }
 }
 
 // ============ 圖形同步 ============
-function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
-
 function ensurePerson(ent, coat) {
-  if (!ent.mesh) { ent.mesh = makePerson(coat, true); dyn.add(ent.mesh); }
+  if (!ent.mesh) { ent.mesh = makePerson(coat); dyn.add(ent.mesh); }
   return ent.mesh;
 }
 
-function animatePerson(mesh, ent) {
-  mesh.position.set(wx(ent.x), Math.abs(Math.sin(ent.walk)) * 1.6, ent.y);
-  mesh.rotation.y = ent.heading;
+function animatePerson(mesh, ent, opt, t) {
   const u = mesh.userData;
-  const sw = ent.swing || 0;
-  if (sw > 0) {
-    // 揮擊：高舉 → 快速劈下
-    const p = 1 - sw;
-    u.armR.rotation.x = -2.5 + 3.2 * easeOutCubic(Math.min(1, p / 0.55));
-    u.armL.rotation.x = 0.4;
+  const cold = opt.cold || 0;
+  // 發抖
+  const jx = cold > 0 ? (Math.random() - .5) * cold * 1.6 : 0;
+  const jz = cold > 0 ? (Math.random() - .5) * cold * 1.6 : 0;
+  mesh.position.set(wx(ent.x) + jx, Math.abs(Math.sin(ent.walk)) * 1.7, ent.y + jz);
+  mesh.rotation.y = ent.heading;
+  // 虛弱前傾 / 取暖放鬆
+  u.bodyG.rotation.x = cold === 2 ? 0.32 : (cold === 1 ? 0.14 : 0);
+  // 呼吸
+  u.body.scale.y = 1 + Math.sin(t * 2.2 + ent.x) * 0.025;
+  const act = opt.action;
+  u.axe.visible = act === 'chop';
+  u.pick.visible = act === 'mine';
+  if (act === 'chop' || act === 'mine') {
+    // 連續揮擊
+    u.armR.rotation.x = -2.2 + 2.6 * Math.abs(Math.sin((opt.swingT || 0) * Math.PI / (opt.interval || 0.52)));
+    u.armL.rotation.x = 0.3;
+  } else if (act === 'rescue') {
+    u.armR.rotation.x = -1.2 + Math.sin(t * 10) * 0.4;
+    u.armL.rotation.x = -1.2 - Math.sin(t * 10) * 0.4;
   } else {
-    u.armR.rotation.x = -0.45 + Math.sin(ent.walk) * 0.55;
-    u.armL.rotation.x = -0.45 - Math.sin(ent.walk) * 0.55;
+    u.armR.rotation.x = -0.4 + Math.sin(ent.walk) * 0.55;
+    u.armL.rotation.x = -0.4 - Math.sin(ent.walk) * 0.55;
+  }
+  // 背包資源堆
+  const cw = opt.carryWood || 0, cs = opt.carryStone || 0;
+  for (let i = 0; i < u.slots.length; i++) {
+    const s = u.slots[i];
+    if (i < cw) { s.visible = true; s.material = woodSlotMat; }
+    else if (i < cw + cs) { s.visible = true; s.material = stoneSlotMat; }
+    else s.visible = false;
   }
 }
 
@@ -930,110 +995,145 @@ function syncGraphics(dt, t) {
 
   // 玩家
   const pm = ensurePerson(pl, 0x4a90d4);
-  pm.visible = pl.deadT <= 0;
-  animatePerson(pm, pl);
-
-  // 夥伴
-  for (const f of state.followers) {
-    const fm = ensurePerson(f, 0x5aa8d4);
-    animatePerson(fm, f);
+  pm.visible = true;
+  if (pl.collapseT > 0) {
+    pm.rotation.z = Math.min((2.4 - pl.collapseT) * 4, 1.5);
+    pm.position.set(wx(pl.x), 0, pl.y);
+  } else {
+    pm.rotation.z = 0;
+    animatePerson(pm, pl, {
+      cold: coldLevel(),
+      action: pl.action ? pl.action.type : null,
+      swingT: pl.hitT, interval: pl.action && pl.action.type === 'mine' ? 0.62 / gatherSpeed() : 0.52 / gatherSpeed(),
+      carryWood: pl.carryWood, carryStone: pl.carryStone
+    }, t);
   }
 
-  // 野獸
-  for (const b of state.bears) {
-    if (!b.mesh) { b.mesh = makeBear(b.size); dyn.add(b.mesh); }
-    const m = b.mesh;
-    if (b.state === 'dead') {
-      m.rotation.z = Math.min(b.deadT * 2.4, 1.45);
-      m.position.set(wx(b.x), b.deadT > 0.9 ? -(b.deadT - 0.9) * 28 : 0, b.y);
-      if (b.deadT > 2.2) m.visible = false;
+  // 生還者
+  for (const sv of state.survivors) {
+    const m = ensurePerson(sv, 0xa8423c);
+    if (sv.state === 'frozen') {
+      if (!sv.iceMesh) { sv.iceMesh = makeIceBlock(); dyn.add(sv.iceMesh); }
+      sv.iceMesh.position.set(wx(sv.x), 16, sv.y);
+      sv.iceMesh.material.opacity = 0.55 - (sv.rescueT / 2) * 0.3;
+      m.position.set(wx(sv.x), 0, sv.y);
+      m.rotation.y = sv.heading;
+      m.userData.bodyG.rotation.x = 0.45;   // 蜷縮
+      m.userData.armR.rotation.x = -1.5;
+      m.userData.armL.rotation.x = -1.5;
     } else {
-      m.visible = true;
-      m.position.set(wx(b.x), Math.abs(Math.sin(b.walk)) * 1.6 * b.size, b.y);
-      m.rotation.y = b.heading;
-      m.rotation.z = 0;
-      const legs = m.userData.legs;
-      for (let i = 0; i < 4; i++) legs[i].rotation.x = Math.sin(b.walk + (i % 2) * Math.PI) * 0.55;
-      m.userData.flashMat.emissive.setHex(b.hitFlash > 0 ? 0xc23a3a : 0x000000);
+      if (sv.iceMesh) { dyn.remove(sv.iceMesh); sv.iceMesh = null; }
+      animatePerson(m, sv, {
+        action: sv.task === 'chop' && sv.swing !== undefined && Math.hypot((sv.target ? sv.target.x : 0) - sv.x, (sv.target ? sv.target.y : 0) - sv.y) < 40 ? 'chop' : null,
+        swingT: sv.taskT, interval: 0.9,
+        carryWood: sv.carry, carryStone: 0
+      }, t);
     }
   }
 
-  // 肉塊
-  for (const m of state.meats) {
-    if (!m.mesh) { m.mesh = makeMeatMesh(); dyn.add(m.mesh); }
-    m.mesh.position.set(wx(m.x), 3 + m.h, m.y);
-    m.mesh.rotation.y += dt * 2.5;
+  // 樹
+  for (const tr of state.trees) {
+    if (!tr.mesh) { tr.mesh = makeTree(); dyn.add(tr.mesh); }
+    const m = tr.mesh;
+    if (tr.hp <= 0) {
+      if (tr.fallT > 0 && tr.fallT < 1.2) {
+        m.visible = true;
+        m.rotation.z = Math.min(tr.fallT * 2.4, 1.5);
+        m.position.set(wx(tr.x), tr.fallT > 0.6 ? -(tr.fallT - 0.6) * 30 : 0, tr.y);
+      } else m.visible = false;
+    } else {
+      m.visible = true;
+      const pop = tr.popT > 0 ? 1 - tr.popT * 0.9 : 1;
+      m.scale.setScalar(Math.max(0.1, pop));
+      m.rotation.z = tr.shake > 0 ? Math.sin(tr.shake * 50) * 0.06 : 0;
+      m.position.set(wx(tr.x), 0, tr.y);
+    }
+  }
+  // 礦石
+  for (const rk of state.rocks) {
+    if (!rk.mesh) { rk.mesh = makeOreRock(); dyn.add(rk.mesh); }
+    const m = rk.mesh;
+    if (rk.hp <= 0) m.visible = false;
+    else {
+      m.visible = true;
+      const pop = rk.popT > 0 ? 1 - rk.popT * 0.9 : 1;
+      const sc = (0.5 + 0.5 * (rk.hp / rk.maxHp)) * Math.max(0.1, pop);
+      m.scale.setScalar(sc);
+      m.position.set(wx(rk.x) + (rk.shake > 0 ? Math.sin(rk.shake * 60) * 2 : 0), 0, rk.y);
+    }
   }
 
-  // 營火
-  const flv = state.stations.fire.lv;
+  // 資源小物件
+  for (const it of state.items) {
+    if (!it.mesh) { it.mesh = makeItemMesh(it.type); dyn.add(it.mesh); }
+    it.mesh.position.set(wx(it.x), 3 + it.h, it.y);
+    it.mesh.rotation.y += dt * 3;
+  }
+
+  // 火爐動畫
   const flick = 1 + Math.sin(t * 11) * .1 + Math.sin(t * 23.7) * .06;
+  const fs = 0.75 + state.furnaceLv * 0.14;
   ST.flames.forEach((f, i) => {
-    const s = (0.8 + flv * 0.25) * flick * (1 - i * 0.06);
+    const s = fs * flick * (1 - i * 0.06);
     f.scale.set(s, s * (1 + Math.sin(t * 9 + i) * .12), s);
   });
-  ST.fireLight.intensity = (1.2 + flv * 0.5) * flick;
+  ST.fireLight.intensity = (1.4 + state.furnaceLv * 0.45) * flick;
+  ST.fireLight.distance = warmRadius() * 2.4;
+  ST.bands.forEach((b, i) => {
+    b.material.emissiveIntensity = 0.7 + Math.sin(t * 6 + i * 2) * 0.3;
+  });
+  // 溫暖區半徑
+  warmZone.scale.setScalar(warmRadius());
+  warmEdge.scale.setScalar(warmRadius());
+  warmEdge.material.opacity = 0.35 + Math.sin(t * 3) * 0.1;
 
-  // 鐵砧磚 / 帳篷
-  ST.bricks.forEach((b, i) => { b.visible = i < state.stations.anvil.lv; });
-  const ts = 1 + state.stations.tent.lv * 0.12;
-  ST.tent.scale.setScalar(ts);
-  ST.tentSnow.position.y = 38 * ts;
-
-  // 升級圈
-  for (const key in rings) {
-    const st = state.stations[key];
-    const ring = rings[key];
-    const maxed = st.lv >= st.costs.length;
+  // 建設圈
+  for (const key in ringMeshes) {
+    const r = state.rings[key];
+    const lvNow = key === 'furnace' ? state.furnaceLv - 1 : (key === 'bag' ? state.bagLv : state.toolLv);
+    const ring = ringMeshes[key];
+    const maxed = lvNow >= r.costs.length;
     ring.visible = !maxed && state.phase === 'play';
     if (ring.visible) {
-      const paid = (state.stPaid[key] || 0) / st.costs[st.lv];
+      const paid = (state.paid[key] || 0) / r.costs[lvNow];
       ring.scale.setScalar(1 + Math.sin(t * 4) * 0.05);
       ring.material.color.setHex(paid > 0 ? 0x7aff9d : 0xffffff);
     }
   }
 
-  // 大門滑開
-  const gateNear = pl.deadT <= 0 && Math.hypot(pl.x - 210, pl.y - CAMP.top) < 110;
-  const glX = wx(GATE.x0) + 29 - (gateNear ? 50 : 0);
-  const grX = wx(GATE.x1) - 29 + (gateNear ? 50 : 0);
-  gateL.position.x += (glX - gateL.position.x) * Math.min(1, dt * 7);
-  gateR.position.x += (grX - gateR.position.x) * Math.min(1, dt * 7);
-
-  // 等待生還者擺動
-  waiters.forEach((m, i) => {
-    m.position.y = Math.abs(Math.sin(t * 2 + i * 1.7)) * 1.2;
-    m.userData.armR.rotation.x = Math.sin(t * 2 + i) * 0.2 - 0.4;
-    m.userData.armL.rotation.x = -Math.sin(t * 2 + i) * 0.2 - 0.4;
-  });
+  // 腳印淡出
+  for (const fp of footprints) {
+    if (fp.life > 0) {
+      fp.life -= dt / 3;
+      fp.mesh.material.opacity = Math.max(0, fp.life) * 0.32;
+    }
+  }
 
   // 雪花
   const pos = snowGeo.attributes.position.array;
   for (let i = 0; i < SNOW_N; i++) {
     pos[i * 3 + 1] -= snowVel[i] * dt;
-    pos[i * 3] += Math.sin(t + i) * 6 * dt;
+    pos[i * 3] += Math.sin(t + i) * 7 * dt;
     if (pos[i * 3 + 1] < 0) {
       pos[i * 3 + 1] = 420 + Math.random() * 80;
-      pos[i * 3] = -300 + Math.random() * 600;
+      pos[i * 3] = camTarget.x - 480 + Math.random() * 960;
       pos[i * 3 + 2] = camTarget.z - 900 + Math.random() * 1500;
     }
   }
   snowGeo.attributes.position.needsUpdate = true;
 
-  // 鏡頭平滑跟隨 + 受擊震動
-  camTarget.x += (wx(pl.x) * 0.55 - camTarget.x) * Math.min(1, dt * 5);
+  // 鏡頭：平滑跟隨，角色保持在畫面中下方
+  camTarget.x += (wx(pl.x) - camTarget.x) * Math.min(1, dt * 5);
   camTarget.z += (pl.y - camTarget.z) * Math.min(1, dt * 5);
-  const shx = state.shake > 0 ? (Math.random() - .5) * 10 : 0;
-  const shy = state.shake > 0 ? (Math.random() - .5) * 10 : 0;
-  camera.position.set(camTarget.x + CAM_OFF.x + shx, CAM_OFF.y, camTarget.z + CAM_OFF.z);
-  camera.lookAt(camTarget.x + shx, shy, camTarget.z - 100);
+  const shx = state.shake > 0 ? (Math.random() - .5) * 8 : 0;
+  camera.position.set(camTarget.x + shx, CAM_OFF.y, camTarget.z + CAM_OFF.z);
+  camera.lookAt(camTarget.x + shx, 0, camTarget.z - 125);
 
-  // 太陽跟著鏡頭（陰影範圍）
   sun.position.set(camTarget.x + 260, 620, camTarget.z + 160);
   sun.target.position.set(camTarget.x, 0, camTarget.z);
 }
 
-// ============ UI 繪製 ============
+// ============ UI ============
 function rr(x, y, w, h, r) {
   uiCtx.beginPath();
   uiCtx.moveTo(x + r, y);
@@ -1057,38 +1157,47 @@ function drawUI(t) {
   }
 
   if (state.phase === 'play') {
-    // 野獸血條
-    for (const b of state.bears) {
-      if (b.state === 'dead' || b.hp >= b.maxHp || b.tier === 2) continue;
-      const p = toScreen(b.x, 52 * b.size, b.y);
+    // 救援進度圈
+    for (const sv of state.survivors) {
+      if (sv.state !== 'frozen' || sv.rescueT <= 0) continue;
+      const p = toScreen(sv.x, 46, sv.y);
       if (p.behind) continue;
-      const bw = 56 * k * b.size;
-      uiCtx.fillStyle = 'rgba(0,0,0,.45)';
-      rr(p.x - bw / 2, p.y, bw, 6 * k, 3 * k); uiCtx.fill();
-      uiCtx.fillStyle = '#ff5a5a';
-      const r = Math.max(0, b.hp / b.maxHp);
-      if (r > .04) { rr(p.x - bw / 2, p.y, bw * r, 6 * k, 3 * k); uiCtx.fill(); }
+      uiCtx.strokeStyle = 'rgba(255,255,255,.4)'; uiCtx.lineWidth = 5 * k;
+      uiCtx.beginPath(); uiCtx.arc(p.x, p.y, 20 * k, 0, 6.28); uiCtx.stroke();
+      uiCtx.strokeStyle = '#7affc8';
+      uiCtx.beginPath(); uiCtx.arc(p.x, p.y, 20 * k, -1.57, -1.57 + 6.28 * (sv.rescueT / 2)); uiCtx.stroke();
     }
-    // 玩家血條
-    if (pl.deadT <= 0) {
-      const p = toScreen(pl.x, 44, pl.y);
-      const bw = 56 * k;
-      uiCtx.fillStyle = 'rgba(0,0,0,.45)';
-      rr(p.x - bw / 2, p.y, bw, 7 * k, 3.5 * k); uiCtx.fill();
-      uiCtx.fillStyle = '#5fe07a';
-      const r = Math.max(0, pl.hp / playerMaxHp());
-      if (r > .04) { rr(p.x - bw / 2, p.y, bw * r, 7 * k, 3.5 * k); uiCtx.fill(); }
+    // 樹/礦血點
+    for (const tr of state.trees) {
+      if (tr.hp <= 0 || tr.hp >= tr.maxHp) continue;
+      const p = toScreen(tr.x, 66, tr.y);
+      if (p.behind) continue;
+      for (let i = 0; i < tr.maxHp; i++) {
+        uiCtx.fillStyle = i < tr.hp ? '#7aff9d' : 'rgba(0,0,0,.35)';
+        uiCtx.beginPath(); uiCtx.arc(p.x - (tr.maxHp - 1) * 5 * k / 2 + i * 5 * k, p.y, 2 * k, 0, 6.28); uiCtx.fill();
+      }
+    }
+    for (const rk of state.rocks) {
+      if (rk.hp <= 0 || rk.hp >= rk.maxHp) continue;
+      const p = toScreen(rk.x, 26, rk.y);
+      if (p.behind) continue;
+      for (let i = 0; i < rk.maxHp; i++) {
+        uiCtx.fillStyle = i < rk.hp ? '#ffd24a' : 'rgba(0,0,0,.35)';
+        uiCtx.beginPath(); uiCtx.arc(p.x - (rk.maxHp - 1) * 5 * k / 2 + i * 5 * k, p.y, 2 * k, 0, 6.28); uiCtx.fill();
+      }
     }
 
-    // 建設站標價
-    for (const key in state.stations) {
-      const st = state.stations[key];
-      if (st.lv >= st.costs.length) continue;
-      const p = toScreen(st.x, 0, st.y + 52);
+    // 建設圈標價
+    for (const key in state.rings) {
+      const r = state.rings[key];
+      const lvNow = key === 'furnace' ? state.furnaceLv - 1 : (key === 'bag' ? state.bagLv : state.toolLv);
+      if (lvNow >= r.costs.length) continue;
+      const p = toScreen(r.x, 0, r.y + 44);
       if (p.behind) continue;
-      const cost = st.costs[st.lv];
-      const paid = state.stPaid[key] || 0;
-      const txt = st.icon + ' ' + st.label + '  🥩' + Math.ceil(cost - paid);
+      const cost = r.costs[lvNow];
+      const paid = state.paid[key] || 0;
+      const resIcon = r.res === 'wood' ? '🪵' : '🪨';
+      const txt = r.icon + ' ' + r.label + '  ' + resIcon + Math.ceil(cost - paid);
       uiCtx.font = 'bold ' + (12 * k) + 'px sans-serif';
       const tw = uiCtx.measureText(txt).width;
       uiCtx.fillStyle = 'rgba(12,24,44,.85)';
@@ -1101,62 +1210,96 @@ function drawUI(t) {
       uiCtx.fillText(txt, p.x, p.y + 4 * k);
     }
 
-    // 魔王血條
-    const boss = state.bears.find(b => b.tier === 2);
-    if (boss && boss.state !== 'dead' && pl.y < 760) {
-      const bx = uiW / 2, by = 56 + safeTop;
-      uiCtx.fillStyle = 'rgba(12,24,44,.82)';
-      rr(bx - 160 * k, by, 320 * k, 34 * k, 10 * k); uiCtx.fill();
-      uiCtx.fillStyle = '#fff';
-      uiCtx.font = 'bold ' + (12 * k) + 'px sans-serif'; uiCtx.textAlign = 'center';
-      uiCtx.fillText('❄️ 冰原巨獸', bx, by + 14 * k);
-      uiCtx.fillStyle = 'rgba(255,255,255,.18)';
-      rr(bx - 150 * k, by + 20 * k, 300 * k, 8 * k, 4 * k); uiCtx.fill();
-      uiCtx.fillStyle = '#ff4a4a';
-      const r = Math.max(0, boss.hp / boss.maxHp);
-      if (r > .02) { rr(bx - 150 * k, by + 20 * k, 300 * k * r, 8 * k, 4 * k); uiCtx.fill(); }
-    }
-
-    // HUD：🥩 與目標
+    // ===== HUD =====
     const hudY = 12 + safeTop;
-    uiCtx.fillStyle = 'rgba(12,24,44,.82)';
-    rr(uiW - 124 * k - 12, hudY, 124 * k, 36 * k, 18 * k); uiCtx.fill();
-    uiCtx.font = 'bold ' + (17 * k) + 'px sans-serif'; uiCtx.textAlign = 'left';
+    // 資源列
+    uiCtx.fillStyle = 'rgba(12,24,44,.8)';
+    rr(12, hudY, 210 * k, 36 * k, 12 * k); uiCtx.fill();
+    uiCtx.font = 'bold ' + (15 * k) + 'px sans-serif'; uiCtx.textAlign = 'left';
     uiCtx.fillStyle = '#fff';
-    uiCtx.fillText('🥩', uiW - 114 * k - 12, hudY + 25 * k);
-    uiCtx.fillStyle = '#ffd2a0';
-    uiCtx.fillText(String(Math.floor(state.meat)), uiW - 86 * k - 12, hudY + 25 * k);
+    uiCtx.fillText('🪵 ' + state.wood, 24, hudY + 24 * k);
+    uiCtx.fillText('🪨 ' + state.stone, 92 * k, hudY + 24 * k);
+    uiCtx.fillText('🙌 ' + state.rescued + '/' + SURVIVOR_GOAL, 156 * k, hudY + 24 * k);
 
-    uiCtx.fillStyle = 'rgba(12,24,44,.7)';
-    rr(12, hudY, 178 * k, 36 * k, 10 * k); uiCtx.fill();
+    // 溫暖度條
+    const wbX = uiW - 150 * k - 12, wbW = 150 * k;
+    uiCtx.fillStyle = 'rgba(12,24,44,.8)';
+    rr(wbX, hudY, wbW, 36 * k, 12 * k); uiCtx.fill();
+    uiCtx.font = (15 * k) + 'px sans-serif';
+    uiCtx.fillText('🌡️', wbX + 8, hudY + 24 * k);
+    uiCtx.fillStyle = 'rgba(255,255,255,.16)';
+    rr(wbX + 34 * k, hudY + 11 * k, wbW - 44 * k, 14 * k, 7 * k); uiCtx.fill();
+    const wr = state.warmth / 100;
+    const warmCol = wr > .4 ? '#ff9d3c' : (wr > .15 ? '#ffd24a' : '#7ab8e0');
+    uiCtx.fillStyle = warmCol;
+    if (wr > .03) { rr(wbX + 34 * k, hudY + 11 * k, (wbW - 44 * k) * wr, 14 * k, 7 * k); uiCtx.fill(); }
+
+    // 目標 / 背包
+    uiCtx.fillStyle = 'rgba(12,24,44,.6)';
+    rr(12, hudY + 42 * k, 260 * k, 24 * k, 8 * k); uiCtx.fill();
     uiCtx.fillStyle = '#aee2ff';
-    uiCtx.font = 'bold ' + (12 * k) + 'px sans-serif';
-    uiCtx.fillText('目標：擊敗北方的冰原巨獸', 22, hudY + 23 * k);
+    uiCtx.font = 'bold ' + (11 * k) + 'px sans-serif'; uiCtx.textAlign = 'left';
+    uiCtx.fillText('目標：火爐升到 Lv.' + FURNACE_MAX + '（現在 Lv.' + state.furnaceLv + '）＋ 救回所有生還者', 22, hudY + 58 * k);
+    uiCtx.fillStyle = 'rgba(12,24,44,.6)';
+    rr(uiW - 86 * k - 12, hudY + 42 * k, 86 * k, 24 * k, 8 * k); uiCtx.fill();
+    uiCtx.fillStyle = carried() >= bagCap() ? '#ffd24a' : '#fff';
+    uiCtx.fillText('🎒 ' + carried() + '/' + bagCap(), uiW - 78 * k - 12, hudY + 58 * k);
+
+    // 寒冷警告 + 結霜邊框
+    const coldness = 1 - state.warmth / 100;
+    if (coldness > 0.55) {
+      const v = uiCtx.createRadialGradient(uiW / 2, uiH / 2, uiH * .25, uiW / 2, uiH / 2, uiH * .7);
+      v.addColorStop(0, 'rgba(140,190,255,0)');
+      v.addColorStop(1, 'rgba(120,170,230,' + Math.min(.75, (coldness - .55) * 1.8) + ')');
+      uiCtx.fillStyle = v;
+      uiCtx.fillRect(0, 0, uiW, uiH);
+    }
+    if (state.warmth < 30 && pl.collapseT <= 0) {
+      uiCtx.fillStyle = 'rgba(160,210,255,' + (0.6 + Math.sin(t * 6) * 0.3) + ')';
+      uiCtx.font = 'bold ' + (17 * k) + 'px sans-serif'; uiCtx.textAlign = 'center';
+      uiCtx.fillText('🥶 太冷了！快回火爐取暖', uiW / 2, hudY + 96 * k);
+    }
+    if (pl.collapseT > 0) {
+      uiCtx.fillStyle = 'rgba(40,70,120,.4)';
+      uiCtx.fillRect(0, 0, uiW, uiH);
+      uiCtx.fillStyle = '#fff';
+      uiCtx.font = 'bold ' + (22 * k) + 'px sans-serif'; uiCtx.textAlign = 'center';
+      uiCtx.fillText('🥶 凍倒了…被拖回火爐邊', uiW / 2, uiH / 2 - 40);
+    }
 
     // 目標箭頭
     let gx = null, gy = null, cheapest = null;
-    for (const key in state.stations) {
-      const st = state.stations[key];
-      if (st.lv >= st.costs.length) continue;
-      const c = st.costs[st.lv] - (state.stPaid[key] || 0);
-      if (state.meat >= c && (!cheapest || c < cheapest.c)) cheapest = { st, c };
+    for (const key in state.rings) {
+      const r = state.rings[key];
+      const lvNow = key === 'furnace' ? state.furnaceLv - 1 : (key === 'bag' ? state.bagLv : state.toolLv);
+      if (lvNow >= r.costs.length) continue;
+      const c = r.costs[lvNow] - (state.paid[key] || 0);
+      if (state[r.res] >= c && (!cheapest || c < cheapest.c)) cheapest = { r, c };
     }
-    if (cheapest) { gx = cheapest.st.x; gy = cheapest.st.y; }
+    if (carried() >= bagCap() * 0.99) { gx = FURNACE.x; gy = FURNACE.y; }
+    else if (cheapest) { gx = cheapest.r.x; gy = cheapest.r.y; }
     else {
       let bd = 1e9;
-      for (const b of state.bears) {
-        if (b.state === 'dead') continue;
-        const d = Math.hypot(b.x - pl.x, b.y - pl.y);
-        if (d < bd) { bd = d; gx = b.x; gy = b.y; }
+      for (const sv of state.survivors) {
+        if (sv.state !== 'frozen') continue;
+        const d = Math.hypot(sv.x - pl.x, sv.y - pl.y);
+        if (d < bd) { bd = d; gx = sv.x; gy = sv.y; }
+      }
+      if (gx === null) {
+        for (const tr of state.trees) {
+          if (tr.hp <= 0) continue;
+          const d = Math.hypot(tr.x - pl.x, tr.y - pl.y);
+          if (d < bd) { bd = d; gx = tr.x; gy = tr.y; }
+        }
       }
     }
-    if (gx !== null && pl.deadT <= 0 && Math.hypot(gx - pl.x, gy - pl.y) > 140) {
+    if (gx !== null && pl.collapseT <= 0 && Math.hypot(gx - pl.x, gy - pl.y) > 130) {
       const pp = toScreen(pl.x, 30, pl.y);
       const tp = toScreen(gx, 0, gy);
       const a = Math.atan2(tp.y - pp.y, tp.x - pp.x);
       const bounce = Math.sin(t * 5) * 5;
       uiCtx.save();
-      uiCtx.translate(pp.x + Math.cos(a) * (62 + bounce) * k, pp.y + Math.sin(a) * (62 + bounce) * k);
+      uiCtx.translate(pp.x + Math.cos(a) * (64 + bounce) * k, pp.y + Math.sin(a) * (64 + bounce) * k);
       uiCtx.rotate(a + Math.PI / 2);
       uiCtx.fillStyle = '#52e06a';
       uiCtx.beginPath();
@@ -1165,19 +1308,6 @@ function drawUI(t) {
       uiCtx.closePath(); uiCtx.fill();
       uiCtx.strokeStyle = 'rgba(255,255,255,.85)'; uiCtx.lineWidth = 1.6; uiCtx.stroke();
       uiCtx.restore();
-    }
-
-    // 受傷紅暈 / 被擊倒
-    if (pl.hurtFlash > 0) {
-      uiCtx.fillStyle = 'rgba(200,30,30,' + Math.min(.4, pl.hurtFlash) + ')';
-      uiCtx.fillRect(0, 0, uiW, uiH);
-    }
-    if (pl.deadT > 0) {
-      uiCtx.fillStyle = 'rgba(80,10,10,.4)';
-      uiCtx.fillRect(0, 0, uiW, uiH);
-      uiCtx.fillStyle = '#fff';
-      uiCtx.font = 'bold ' + (22 * k) + 'px sans-serif'; uiCtx.textAlign = 'center';
-      uiCtx.fillText('💫 被擊倒了…正送回營地', uiW / 2, uiH / 2 - 40);
     }
 
     // 搖桿
@@ -1199,7 +1329,7 @@ function drawUI(t) {
   }
   uiCtx.globalAlpha = 1;
 
-  // 漂浮文字（投影到螢幕）
+  // 漂浮文字
   for (const f of floatTexts) {
     const p = toScreen(f.x, f.h, f.y);
     if (!p.behind) {
@@ -1213,28 +1343,27 @@ function drawUI(t) {
   }
   uiCtx.globalAlpha = 1;
 
-  // 標題 / 勝利畫面
   if (state.phase === 'title') {
-    drawOverlay('❄️ 寒霜獵人 3D ❄️', [
-      '走出營地大門，獵捕冰原巨獸！',
+    drawOverlay('❄️ 寒霜營地 ❄️', [
+      '冰原中央的火爐，是唯一的溫暖。',
       '',
-      '🕹️ 拖曳螢幕（或 WASD）移動',
-      '🔨 靠近野獸自動揮舞狼牙棒',
-      '🥩 撿肉帶回營地，站上白圈升級：',
-      '　 武器・帳篷・營火・招募夥伴',
+      '🕹️ 單指拖曳移動，靠近就會自動行動',
+      '🪓 站在樹旁自動砍柴　⛏️ 站在礦旁自動採石',
+      '🎒 資源揹在背上，走回火爐自動存放',
+      '🥶 離火爐越遠越冷，凍倒會掉資源！',
+      '🧊 救出冰封的生還者，他們會幫你砍柴',
       '',
-      '被打倒會掉落 30% 的肉。',
-      '擊敗最北方的「冰原巨獸」獲勝！'
+      '⭕ 站上白圈升級：火爐・背包・工具',
+      '火爐升到 Lv.' + FURNACE_MAX + ' 並救回 ' + SURVIVOR_GOAL + ' 人即獲勝！'
     ], '點擊開始', k);
   } else if (state.phase === 'win') {
-    drawOverlay('🏆 巨獸倒下了！', [
-      '營地從此不再受冰原巨獸威脅！',
+    drawOverlay('🏆 營地重獲生機！', [
+      '火爐熊熊燃燒，所有生還者都獲救了！',
       '',
-      '🥩 剩餘肉量：' + Math.floor(state.meat),
-      '🐻 狩獵次數：' + state.kills,
-      '💫 被擊倒：' + state.deaths + ' 次',
-      '🤝 夥伴：' + state.followers.length + ' 名',
-      '⚒️ 武器等級：Lv.' + state.stations.anvil.lv
+      '⏱️ 用時：' + Math.floor(state.time / 60) + ' 分 ' + Math.floor(state.time % 60) + ' 秒',
+      '🪵 砍柴：' + state.chopped + '　🪨 採石：' + state.mined,
+      '🙌 救援：' + state.rescued + ' 人',
+      '🥶 凍倒：' + state.collapses + ' 次'
     ], '再玩一次', k);
   }
 }
@@ -1244,11 +1373,11 @@ function drawOverlay(title, lines, btnText, k) {
   uiCtx.fillRect(0, 0, uiW, uiH);
   uiCtx.textAlign = 'center';
   uiCtx.fillStyle = '#fff';
-  uiCtx.font = 'bold ' + (32 * k) + 'px sans-serif';
-  uiCtx.fillText(title, uiW / 2, uiH / 2 - 150 * k);
+  uiCtx.font = 'bold ' + (30 * k) + 'px sans-serif';
+  uiCtx.fillText(title, uiW / 2, uiH / 2 - 160 * k);
   uiCtx.fillStyle = '#dce8f5';
-  uiCtx.font = (15 * k) + 'px sans-serif';
-  lines.forEach((l, i) => uiCtx.fillText(l, uiW / 2, uiH / 2 - 95 * k + i * 28 * k));
+  uiCtx.font = (14.5 * k) + 'px sans-serif';
+  lines.forEach((l, i) => uiCtx.fillText(l, uiW / 2, uiH / 2 - 110 * k + i * 27 * k));
   const pulse = 1 + Math.sin(performance.now() / 300) * .04;
   uiCtx.save();
   uiCtx.translate(uiW / 2, uiH / 2 + 185 * k); uiCtx.scale(pulse, pulse);
