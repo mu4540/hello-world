@@ -2,19 +2,32 @@
 <html lang="zh-Hant">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="寒霜獵人">
+<meta name="theme-color" content="#0a1428">
 <title>寒霜獵人 ❄️ 廣告同款小遊戲</title>
 <style>
+  :root {
+    --sat: env(safe-area-inset-top, 0px);
+    --sab: env(safe-area-inset-bottom, 0px);
+  }
   * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body {
     width: 100%; height: 100%; overflow: hidden;
+    position: fixed; inset: 0;
     background: #0a1428;
     font-family: "PingFang TC", "Microsoft JhengHei", "Noto Sans TC", sans-serif;
     touch-action: none;
+    overscroll-behavior: none;
     user-select: none; -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-text-size-adjust: none;
   }
   #wrap { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }
-  canvas { display: block; border-radius: 8px; box-shadow: 0 0 60px rgba(120,180,255,.15); }
+  canvas { display: block; touch-action: none; }
 </style>
 </head>
 <body>
@@ -22,24 +35,58 @@
 <script>
 'use strict';
 
-// ===== 畫布（直式）=====
-const W = 420, H = 740;
+// ===== 畫布（直式，配合 iPhone 滿版顯示）=====
+const W = 420;
+let H = 740;            // 依裝置長寬比動態調整，避免上下黑邊
+let safeTop = 0, safeBot = 0;   // 瀏海 / Home 指示條安全區（遊戲座標）
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
+
+function readSafeArea() {
+  const cs = getComputedStyle(document.documentElement);
+  return {
+    top: parseFloat(cs.getPropertyValue('--sat')) || 0,
+    bot: parseFloat(cs.getPropertyValue('--sab')) || 0
+  };
+}
+
 function resize() {
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  const scale = Math.min(window.innerWidth / W, window.innerHeight / H);
+  const vw = window.visualViewport ? window.visualViewport.width : window.innerWidth;
+  const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+  // 邏輯高度貼合裝置比例（iPhone 約 2.16:1 → H≈908），太寬的桌面螢幕則維持 740
+  H = Math.max(740, Math.min(1020, Math.round(W * vh / vw)));
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  const scale = Math.min(vw / W, vh / H);
   canvas.style.width = (W * scale) + 'px';
   canvas.style.height = (H * scale) + 'px';
-  canvas.width = W * dpr;
-  canvas.height = H * dpr;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  canvas.width = Math.round(W * scale * dpr);
+  canvas.height = Math.round(H * scale * dpr);
+  ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+  const sa = readSafeArea();
+  safeTop = sa.top / scale;
+  safeBot = sa.bot / scale;
 }
 window.addEventListener('resize', resize);
+window.addEventListener('orientationchange', () => setTimeout(resize, 100));
+if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
 resize();
 
-// ===== 音效 =====
+// ===== 阻擋 iOS Safari 手勢（縮放 / 下拉刷新 / 雙擊放大）=====
+for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) {
+  document.addEventListener(ev, e => e.preventDefault(), { passive: false });
+}
+document.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
+document.addEventListener('dblclick', e => e.preventDefault(), { passive: false });
+document.addEventListener('contextmenu', e => e.preventDefault());
+
+// ===== 音效（iOS 需在觸控手勢中解鎖）=====
 let audioCtx = null;
+function unlockAudio() {
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  } catch (e) {}
+}
 function beep(freq, dur, type, vol) {
   try {
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -158,6 +205,7 @@ function gamePos(e) {
 }
 canvas.addEventListener('pointerdown', e => {
   e.preventDefault();
+  unlockAudio();
   const p = gamePos(e);
   if (state.phase === 'title') { state.phase = 'play'; beep(880, .15, 'sine', .06); return; }
   if (state.phase === 'win') { reset(); state.phase = 'play'; return; }
@@ -742,20 +790,21 @@ function drawStation(key) {
 
 function drawHUD() {
   const pl = state.player;
+  const hudY = 12 + safeTop;   // 避開 iPhone 瀏海
   // 🥩 計數（右上，像廣告）
   ctx.fillStyle = 'rgba(12,24,44,.82)';
-  roundRect(W - 132, 12, 120, 34, 17); ctx.fill();
+  roundRect(W - 132, hudY, 120, 34, 17); ctx.fill();
   ctx.font = 'bold 16px sans-serif'; ctx.textAlign = 'left';
-  ctx.fillText('🥩', W - 122, 36);
+  ctx.fillText('🥩', W - 122, hudY + 24);
   ctx.fillStyle = '#ffd2a0';
-  ctx.fillText(String(Math.floor(state.meat)), W - 96, 36);
+  ctx.fillText(String(Math.floor(state.meat)), W - 96, hudY + 24);
 
   // 目標
   ctx.fillStyle = 'rgba(12,24,44,.7)';
-  roundRect(12, 12, 168, 34, 10); ctx.fill();
+  roundRect(12, hudY, 168, 34, 10); ctx.fill();
   ctx.fillStyle = '#aee2ff';
   ctx.font = 'bold 12px sans-serif';
-  ctx.fillText('目標：擊敗北方的冰原巨獸', 22, 33);
+  ctx.fillText('目標：擊敗北方的冰原巨獸', 22, hudY + 21);
 
   // 玩家血條
   if (pl.deadT <= 0) {
@@ -772,15 +821,15 @@ function drawHUD() {
   if (boss && boss.state !== 'dead' && pl.y < 720) {
     state.bossSeen = true;
     ctx.fillStyle = 'rgba(12,24,44,.82)';
-    roundRect(40, 58, W - 80, 30, 10); ctx.fill();
+    roundRect(40, hudY + 46, W - 80, 30, 10); ctx.fill();
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'center';
-    ctx.fillText('❄️ 冰原巨獸', W / 2, 71);
+    ctx.fillText('❄️ 冰原巨獸', W / 2, hudY + 59);
     ctx.fillStyle = 'rgba(255,255,255,.18)';
-    roundRect(50, 76, W - 100, 8, 4); ctx.fill();
+    roundRect(50, hudY + 64, W - 100, 8, 4); ctx.fill();
     ctx.fillStyle = '#ff4a4a';
     const r = Math.max(0, boss.hp / boss.maxHp);
-    if (r > .02) { roundRect(50, 76, (W - 100) * r, 8, 4); ctx.fill(); }
+    if (r > .02) { roundRect(50, hudY + 64, (W - 100) * r, 8, 4); ctx.fill(); }
   }
 
   // 目標箭頭（綠色，像廣告）
@@ -845,13 +894,13 @@ function drawOverlay(title, lines, btnText, titleColor) {
   ctx.textAlign = 'center';
   ctx.fillStyle = titleColor;
   ctx.font = 'bold 32px sans-serif';
-  ctx.fillText(title, W / 2, 230);
+  ctx.fillText(title, W / 2, H / 2 - 140);
   ctx.fillStyle = '#dce8f5';
   ctx.font = '15px sans-serif';
-  lines.forEach((l, i) => ctx.fillText(l, W / 2, 285 + i * 28));
+  lines.forEach((l, i) => ctx.fillText(l, W / 2, H / 2 - 85 + i * 28));
   const pulse = 1 + Math.sin(performance.now() / 300) * .04;
   ctx.save();
-  ctx.translate(W / 2, 545); ctx.scale(pulse, pulse);
+  ctx.translate(W / 2, H / 2 + 175); ctx.scale(pulse, pulse);
   ctx.fillStyle = '#c25b1e';
   roundRect(-100, -26, 200, 52, 14); ctx.fill();
   ctx.fillStyle = '#fff';
@@ -978,7 +1027,8 @@ function draw() {
     ], '點擊開始', '#aee2ff');
     ctx.fillStyle = 'rgba(255,255,255,.45)';
     ctx.font = '12px sans-serif'; ctx.textAlign = 'center';
-    ctx.fillText('靈感來自《寒霜啟示錄》廣告小遊戲', W / 2, H - 26);
+    ctx.fillText('📱 iPhone：Safari「分享 → 加入主畫面」可全螢幕遊玩', W / 2, H - 48 - safeBot);
+    ctx.fillText('靈感來自《寒霜啟示錄》廣告小遊戲', W / 2, H - 26 - safeBot);
   } else if (state.phase === 'win') {
     drawOverlay('🏆 巨獸倒下了！', [
       '營地從此不再受冰原巨獸威脅！',
