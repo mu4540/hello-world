@@ -163,6 +163,7 @@ window.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; });
 window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 
 let joy = null;
+const JOY_R = 36;   // 拇指推滿半徑（小=靈敏）
 window.addEventListener('pointerdown', e => {
   e.preventDefault();
   unlockAudio();
@@ -173,6 +174,13 @@ window.addEventListener('pointerdown', e => {
 window.addEventListener('pointermove', e => {
   if (!joy || e.pointerId !== joy.id) return;
   joy.dx = e.clientX - joy.sx; joy.dy = e.clientY - joy.sy;
+  // 浮動搖桿：超出半徑時錨點跟著手指走 → 反向改變方向零延遲
+  const d = Math.hypot(joy.dx, joy.dy);
+  if (d > JOY_R) {
+    const ex = (d - JOY_R) / d;
+    joy.sx += joy.dx * ex; joy.sy += joy.dy * ex;
+    joy.dx = e.clientX - joy.sx; joy.dy = e.clientY - joy.sy;
+  }
 });
 window.addEventListener('pointerup', e => { if (joy && e.pointerId === joy.id) joy = null; });
 window.addEventListener('pointercancel', () => { joy = null; });
@@ -199,7 +207,7 @@ scene.background = new THREE.Color(0xdde9f5);
 scene.fog = new THREE.Fog(0xdde9f5, 780, 1900);
 
 const camera = new THREE.PerspectiveCamera(50, 1, 10, 4000);
-const CAM_OFF = new THREE.Vector3(0, 690, 510);
+const CAM_OFF = new THREE.Vector3(0, 475, 350);
 let camTarget = new THREE.Vector3(0, 0, FURNACE.y + 90);
 
 scene.add(new THREE.HemisphereLight(0xcfe2ff, 0xffffff, 0.95));
@@ -621,15 +629,16 @@ function update(dt) {
     if (keys['d'] || keys['arrowright']) mx += 1;
     if (joy) {
       const d = Math.hypot(joy.dx, joy.dy);
-      if (d > 6) { const k = Math.min(1, d / 60); mx = joy.dx / d * k; my = joy.dy / d * k; }
+      if (d > 4) { const k = Math.min(1, d / JOY_R); mx = joy.dx / d * k; my = joy.dy / d * k; }
     }
     const ml = Math.hypot(mx, my);
     if (ml > 1) { mx /= ml; my /= ml; }
     const moving = ml > 0.15;
     const loadF = 1 - 0.28 * (carried() / bagCap());
     const coldF = coldLevel() === 2 ? 0.55 : (coldLevel() === 1 ? 0.85 : 1);
-    const SP = 175 * loadF * coldF;
-    const ease = 1 - Math.exp(-11 * dt);
+    const SP = 195 * loadF * coldF;
+    // 起步快、放開停得更快 → 跟手
+    const ease = 1 - Math.exp(-(moving ? 17 : 22) * dt);
     pl.vx += (mx * SP - pl.vx) * ease;
     pl.vy += (my * SP - pl.vy) * ease;
     pl.x = Math.max(24, Math.min(WORLD_W - 24, pl.x + pl.vx * dt));
@@ -637,7 +646,7 @@ function update(dt) {
     const spd = Math.hypot(pl.vx, pl.vy);
     if (spd > 15) {
       pl.walk += spd * dt * 0.075;
-      pl.heading = lerpAngle(pl.heading, Math.atan2(pl.vx, pl.vy), 14 * dt);
+      pl.heading = lerpAngle(pl.heading, Math.atan2(pl.vx, pl.vy), 19 * dt);
       // 腳印
       fpTimer -= dt;
       if (fpTimer <= 0) {
@@ -1123,11 +1132,11 @@ function syncGraphics(dt, t) {
   snowGeo.attributes.position.needsUpdate = true;
 
   // 鏡頭：平滑跟隨，角色保持在畫面中下方
-  camTarget.x += (wx(pl.x) - camTarget.x) * Math.min(1, dt * 5);
-  camTarget.z += (pl.y - camTarget.z) * Math.min(1, dt * 5);
+  camTarget.x += (wx(pl.x) - camTarget.x) * Math.min(1, dt * 8);
+  camTarget.z += (pl.y - camTarget.z) * Math.min(1, dt * 8);
   const shx = state.shake > 0 ? (Math.random() - .5) * 8 : 0;
   camera.position.set(camTarget.x + shx, CAM_OFF.y, camTarget.z + CAM_OFF.z);
-  camera.lookAt(camTarget.x + shx, 0, camTarget.z - 125);
+  camera.lookAt(camTarget.x + shx, 0, camTarget.z - 88);
 
   sun.position.set(camTarget.x + 260, 620, camTarget.z + 160);
   sun.target.position.set(camTarget.x, 0, camTarget.z);
@@ -1313,11 +1322,11 @@ function drawUI(t) {
     // 搖桿
     if (joy) {
       uiCtx.strokeStyle = 'rgba(255,255,255,.45)'; uiCtx.lineWidth = 3;
-      uiCtx.beginPath(); uiCtx.arc(joy.sx, joy.sy, 42, 0, 6.28); uiCtx.stroke();
+      uiCtx.beginPath(); uiCtx.arc(joy.sx, joy.sy, JOY_R, 0, 6.28); uiCtx.stroke();
       const d = Math.hypot(joy.dx, joy.dy) || 1;
-      const kk = Math.min(d, 40);
+      const kk = Math.min(d, JOY_R - 2);
       uiCtx.fillStyle = 'rgba(255,255,255,.5)';
-      uiCtx.beginPath(); uiCtx.arc(joy.sx + joy.dx / d * kk, joy.sy + joy.dy / d * kk, 20, 0, 6.28); uiCtx.fill();
+      uiCtx.beginPath(); uiCtx.arc(joy.sx + joy.dx / d * kk, joy.sy + joy.dy / d * kk, 17, 0, 6.28); uiCtx.fill();
     }
   }
 
