@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>寒霜求生 ❄️ 廣告同款小遊戲</title>
+<title>寒霜診所 ❄️ 廣告同款小遊戲</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body {
@@ -13,10 +13,7 @@
     touch-action: none;
     user-select: none; -webkit-user-select: none;
   }
-  #wrap {
-    position: fixed; inset: 0;
-    display: flex; align-items: center; justify-content: center;
-  }
+  #wrap { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }
   canvas { display: block; border-radius: 8px; box-shadow: 0 0 60px rgba(120,180,255,.15); }
 </style>
 </head>
@@ -25,7 +22,7 @@
 <script>
 'use strict';
 
-// ===== 畫布與縮放（直式，像 Shorts）=====
+// ===== 畫布（直式）=====
 const W = 420, H = 740;
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -41,7 +38,7 @@ function resize() {
 window.addEventListener('resize', resize);
 resize();
 
-// ===== 簡易音效 =====
+// ===== 音效 =====
 let audioCtx = null;
 function beep(freq, dur, type, vol) {
   try {
@@ -53,307 +50,385 @@ function beep(freq, dur, type, vol) {
     g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + (dur || 0.1));
     o.connect(g); g.connect(audioCtx.destination);
     o.start(); o.stop(audioCtx.currentTime + (dur || 0.1));
-  } catch (e) { /* 無音效也能玩 */ }
+  } catch (e) {}
 }
 
-// ===== 遊戲常數 =====
-const FURNACE = { x: W / 2, y: 400 };
-const DAY_LEN = 40;          // 每天秒數
-const WIN_DAY = 7;           // 撐過第 7 天獲勝
-const MAX_SURVIVORS = 8;
-const TREE_WOOD = 8;         // 每棵樹可砍的木柴
-const WOOD_HEAT = 5;         // 每根木柴升溫度數
-const ICE_TAPS = 3;          // 敲幾下救出冰封者
+// ===== 場景配置 =====
+const ROAD_Y = 78;                       // 卡車道路
+const TRUCK_STOP_X = 110;
+const PEN = { x: 232, y: 50, w: 176, h: 150 };   // 候診圍欄
+const QCOLS = 5, QSPACE_X = 33, QSPACE_Y = 30;
+const DESK = { x: 210, y: 560 };         // 收銀台
+const EXIT = { x: 210, y: 780 };
+const BED_SLOTS = [
+  { x: 70, y: 330 }, { x: 162, y: 330 }, { x: 254, y: 330 }, { x: 346, y: 330 },
+  { x: 70, y: 442 }, { x: 162, y: 442 }, { x: 254, y: 442 }, { x: 346, y: 442 }
+];
+const GOAL_CURED = 50;
+const MAX_FROZEN = 10;
+const COLD_LIMIT = 40;                   // 候診忍耐秒數
+const PAY = 12;                          // 每位病人付費
+const BILL_VAL = 4;
 
-// ===== 遊戲狀態 =====
-let state, snow, particles, floatTexts;
+// ===== 升級定義 =====
+const UPG = {
+  bed:   { label: '新病床', icon: '🛏️', costs: [40, 70, 110, 160, 220, 300] },
+  carry: { label: '搬運+1', icon: '💪', costs: [80, 200] },
+  nurse: { label: '雇護士', icon: '🧑‍⚕️', costs: [150, 350] },
+  heal:  { label: '治療加速', icon: '💉', costs: [100, 220, 380] }
+};
+const PADS = [
+  { key: 'bed',   x: 62,  y: 648 },
+  { key: 'carry', x: 160, y: 648 },
+  { key: 'nurse', x: 258, y: 648 },
+  { key: 'heal',  x: 356, y: 648 }
+];
 
-function newSurvivor(x, y) {
-  return {
-    x, y, tx: x, ty: y,
-    state: 'idle',        // idle | walk | chop
-    tree: null,
-    chopTimer: 0,
-    bob: Math.random() * 6.28,
-    coat: ['#d4622a', '#2a7dd4', '#7d2ad4', '#d42a8c', '#2ad48c'][Math.floor(Math.random() * 5)]
-  };
-}
-
-function spawnTree() {
-  for (let i = 0; i < 50; i++) {
-    const x = 40 + Math.random() * (W - 80);
-    const y = 150 + Math.random() * 470;
-    const dF = Math.hypot(x - FURNACE.x, y - FURNACE.y);
-    if (dF < 110) continue;
-    let ok = true;
-    for (const t of state.trees) if (Math.hypot(x - t.x, y - t.y) < 60) ok = false;
-    for (const b of state.ices) if (Math.hypot(x - b.x, y - b.y) < 60) ok = false;
-    if (ok) { state.trees.push({ x, y, wood: TREE_WOOD, shake: 0 }); return; }
-  }
-}
-
-function spawnIce() {
-  if (state.ices.length >= 3 || state.survivors.length + state.ices.length >= MAX_SURVIVORS) return;
-  for (let i = 0; i < 50; i++) {
-    const x = 50 + Math.random() * (W - 100);
-    const y = 170 + Math.random() * 430;
-    if (Math.hypot(x - FURNACE.x, y - FURNACE.y) < 130) continue;
-    let ok = true;
-    for (const t of state.trees) if (Math.hypot(x - t.x, y - t.y) < 55) ok = false;
-    for (const b of state.ices) if (Math.hypot(x - b.x, y - b.y) < 70) ok = false;
-    if (ok) { state.ices.push({ x, y, taps: ICE_TAPS, shake: 0 }); return; }
-  }
-}
+// ===== 狀態 =====
+let state, snow, floatTexts, bills, flyBills;
 
 function reset() {
   state = {
-    phase: 'title',       // title | play | win | lose
-    temp: 80,
-    wood: 10,
-    day: 1,
-    dayTime: 0,
-    furnaceLv: 1,
-    survivors: [newSurvivor(FURNACE.x - 30, FURNACE.y + 50)],
-    trees: [],
-    ices: [],
-    blizzard: 0,          // 暴風雪剩餘秒數
-    blizzardWarn: 0,
-    nextBlizzard: 35 + Math.random() * 20,
-    iceTimer: 12,
-    fireAnim: 0,
-    shake: 0,
-    rescued: 0,
-    chopped: 0
+    phase: 'title',                  // title | play | win | lose
+    money: 0,
+    cured: 0,
+    frozen: 0,
+    time: 0,
+    wave: 0,
+    truckTimer: 4,
+    truck: null,                     // {x, patientsLeft, unloadTimer, leaving}
+    patients: [],
+    beds: BED_SLOTS.map((p, i) => ({ x: p.x, y: p.y, unlocked: i < 2, patient: null, progress: 0 })),
+    upgLv: { bed: 0, carry: 0, nurse: 0, heal: 0 },
+    padPaid: {},                     // 已投入金額
+    player: { x: 210, y: 270, carry: [], grabCd: 0, dropCd: 0, walk: 0, fx: 1 },
+    nurses: [],
+    hintT: 0
   };
   snow = [];
-  for (let i = 0; i < 120; i++) snow.push({ x: Math.random() * W, y: Math.random() * H, s: 1 + Math.random() * 2, v: 30 + Math.random() * 60 });
-  particles = [];
+  for (let i = 0; i < 70; i++) snow.push({ x: Math.random() * W, y: Math.random() * H, s: 1 + Math.random() * 1.6, v: 25 + Math.random() * 40 });
   floatTexts = [];
-  for (let i = 0; i < 6; i++) spawnTree();
+  bills = [];      // 收銀台上的鈔票堆
+  flyBills = [];   // 飛向玩家的鈔票
 }
 reset();
 
-function maxTemp() { return 90 + state.furnaceLv * 10; }
-function upgradeCost() { return 25 + state.furnaceLv * 15; }
+function carryCap() { return 1 + state.upgLv.carry; }
+function healTime() { return 5 * Math.pow(0.75, state.upgLv.heal); }
+function freeBed() { return state.beds.find(b => b.unlocked && !b.patient && !b.incoming); }
 
-function addFloat(x, y, text, color) {
-  floatTexts.push({ x, y, text, color: color || '#fff', life: 1 });
+function addFloat(x, y, text, color, size) {
+  floatTexts.push({ x, y, text, color: color || '#fff', life: 1.2, size: size || 16 });
 }
 
-// ===== 輸入 =====
+function newPatient(x, y) {
+  return {
+    x, y, state: 'walkToQueue',      // walkToQueue|queue|carried|bed|toDesk|pay|leave|frozen
+    queueIdx: -1, cold: 0, bed: null, carrier: null,
+    payT: 0, frozenT: 0, bob: Math.random() * 6.28
+  };
+}
+
+function queuePos(i) {
+  const col = i % QCOLS, row = Math.floor(i / QCOLS);
+  return { x: PEN.x + 20 + col * QSPACE_X, y: PEN.y + 24 + row * QSPACE_Y };
+}
+
+// ===== 輸入：搖桿 + 鍵盤 =====
+const keys = {};
+window.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; });
+window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+
+let joy = null; // {sx, sy, dx, dy}
 function gamePos(e) {
   const r = canvas.getBoundingClientRect();
-  const cx = (e.touches ? e.touches[0].clientX : e.clientX) - r.left;
-  const cy = (e.touches ? e.touches[0].clientY : e.clientY) - r.top;
-  return { x: cx / r.width * W, y: cy / r.height * H };
+  return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H };
 }
-
-function onTap(p) {
+canvas.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  const p = gamePos(e);
   if (state.phase === 'title') { state.phase = 'play'; beep(880, .15, 'sine', .06); return; }
   if (state.phase === 'win' || state.phase === 'lose') { reset(); state.phase = 'play'; return; }
-
-  // 升級火爐按鈕
-  if (p.x > W - 130 && p.x < W - 10 && p.y > H - 64 && p.y < H - 14) {
-    if (state.wood >= upgradeCost()) {
-      state.wood -= upgradeCost();
-      state.furnaceLv++;
-      state.temp = Math.min(state.temp + 15, maxTemp());
-      addFloat(FURNACE.x, FURNACE.y - 80, '🔥 火爐升級 Lv.' + state.furnaceLv, '#ffd24a');
-      beep(660, .12, 'sine', .06); beep(990, .18, 'sine', .06);
-      burst(FURNACE.x, FURNACE.y - 20, '#ffd24a', 18);
-    } else {
-      addFloat(W - 70, H - 75, '木柴不足！', '#ff7a7a');
-      beep(160, .12, 'sawtooth', .05);
-    }
-    return;
-  }
-  // 添柴按鈕
-  if (p.x > 10 && p.x < 130 && p.y > H - 64 && p.y < H - 14) { feedFire(); return; }
-
-  // 點火爐 → 添柴
-  if (Math.hypot(p.x - FURNACE.x, p.y - FURNACE.y + 10) < 55) { feedFire(); return; }
-
-  // 點冰封生還者 → 敲冰
-  for (let i = state.ices.length - 1; i >= 0; i--) {
-    const b = state.ices[i];
-    if (Math.hypot(p.x - b.x, p.y - b.y) < 38) {
-      b.taps--; b.shake = 0.25;
-      burst(b.x, b.y - 10, '#bfe8ff', 6);
-      beep(1200 - b.taps * 200, .07, 'triangle', .05);
-      if (b.taps <= 0) {
-        state.ices.splice(i, 1);
-        state.survivors.push(newSurvivor(b.x, b.y));
-        state.rescued++;
-        addFloat(b.x, b.y - 30, '🙌 救出生還者 +1', '#7affc8');
-        beep(700, .1, 'sine', .06); beep(1050, .2, 'sine', .06);
-      }
-      return;
-    }
-  }
-
-  // 點樹 → 派最近的閒置工人去砍
-  for (const t of state.trees) {
-    if (Math.hypot(p.x - t.x, p.y - (t.y - 20)) < 42) {
-      let best = null, bd = 1e9;
-      for (const s of state.survivors) {
-        if (s.state === 'chop' && s.tree === t) return; // 已有人在砍
-        const d = Math.hypot(s.x - t.x, s.y - t.y);
-        if (s.state === 'idle' && d < bd) { bd = d; best = s; }
-      }
-      if (!best) { // 沒閒人就抓一個改派
-        for (const s of state.survivors) {
-          const d = Math.hypot(s.x - t.x, s.y - t.y);
-          if (d < bd) { bd = d; best = s; }
-        }
-      }
-      if (best) {
-        best.state = 'walk'; best.tree = t;
-        best.tx = t.x + (best.x < t.x ? -22 : 22); best.ty = t.y + 6;
-        addFloat(t.x, t.y - 55, '⛏️', '#fff');
-        beep(440, .06, 'sine', .04);
-      }
-      return;
-    }
-  }
-}
-
-function feedFire() {
-  if (state.wood <= 0) {
-    addFloat(FURNACE.x, FURNACE.y - 70, '沒有木柴了！快砍樹', '#ff7a7a');
-    beep(160, .12, 'sawtooth', .05);
-    return;
-  }
-  const n = Math.min(state.wood, 3);
-  state.wood -= n;
-  state.temp = Math.min(state.temp + n * WOOD_HEAT, maxTemp());
-  state.fireAnim = 1;
-  addFloat(FURNACE.x, FURNACE.y - 70, '+' + (n * WOOD_HEAT) + '°', '#ffb14a');
-  burst(FURNACE.x, FURNACE.y - 30, '#ff9d3c', 10);
-  beep(520, .08, 'sine', .05);
-}
-
-canvas.addEventListener('pointerdown', e => { e.preventDefault(); onTap(gamePos(e)); });
-
-// ===== 粒子 =====
-function burst(x, y, color, n) {
-  for (let i = 0; i < n; i++) {
-    const a = Math.random() * 6.28, sp = 40 + Math.random() * 90;
-    particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 40, life: .5 + Math.random() * .4, color });
-  }
-}
+  joy = { sx: p.x, sy: p.y, dx: 0, dy: 0, id: e.pointerId };
+});
+canvas.addEventListener('pointermove', e => {
+  if (!joy || e.pointerId !== joy.id) return;
+  const p = gamePos(e);
+  joy.dx = p.x - joy.sx; joy.dy = p.y - joy.sy;
+});
+window.addEventListener('pointerup', e => { if (joy && e.pointerId === joy.id) joy = null; });
+window.addEventListener('pointercancel', () => { joy = null; });
 
 // ===== 更新 =====
 let last = performance.now();
+
+function spawnTruck() {
+  state.wave++;
+  state.truck = { x: -120, patientsLeft: Math.min(3 + state.wave, 10), unloadTimer: 0, leaving: false };
+}
+
 function update(dt) {
   if (state.phase !== 'play') return;
+  state.time += dt;
+  state.hintT += dt;
 
-  // 時間與天數
-  state.dayTime += dt;
-  if (state.dayTime >= DAY_LEN) {
-    state.dayTime = 0;
-    state.day++;
-    if (state.day > WIN_DAY) { state.phase = 'win'; beep(660, .2, 'sine', .07); beep(880, .3, 'sine', .07); return; }
-    addFloat(W / 2, 200, '☀️ 第 ' + state.day + ' 天 — 寒流更強了', '#aee2ff');
-    beep(500, .15, 'sine', .05);
-  }
-
-  // 暴風雪
-  if (state.blizzard > 0) {
-    state.blizzard -= dt;
+  // --- 卡車 ---
+  if (!state.truck) {
+    state.truckTimer -= dt;
+    if (state.truckTimer <= 0) spawnTruck();
   } else {
-    state.nextBlizzard -= dt;
-    if (state.nextBlizzard < 5 && state.blizzardWarn <= 0) {
-      state.blizzardWarn = 5;
-      addFloat(W / 2, 230, '⚠️ 暴風雪即將來襲！', '#ff9d9d');
-      beep(220, .3, 'sawtooth', .05);
-    }
-    if (state.blizzardWarn > 0) state.blizzardWarn -= dt;
-    if (state.nextBlizzard <= 0) {
-      state.blizzard = 8 + state.day;
-      state.nextBlizzard = 30 + Math.random() * 25;
+    const t = state.truck;
+    if (!t.leaving) {
+      if (t.x < TRUCK_STOP_X) t.x += 140 * dt;
+      else {
+        t.unloadTimer -= dt;
+        if (t.unloadTimer <= 0 && t.patientsLeft > 0) {
+          t.unloadTimer = 0.45;
+          t.patientsLeft--;
+          state.patients.push(newPatient(t.x + 40, ROAD_Y + 18));
+          beep(500 + Math.random() * 100, .05, 'triangle', .03);
+        }
+        if (t.patientsLeft <= 0) t.leaving = true;
+      }
+    } else {
+      t.x += 180 * dt;
+      if (t.x > W + 140) { state.truck = null; state.truckTimer = Math.max(8, 17 - state.wave * 0.5); }
     }
   }
 
-  // 溫度下降：天數越多越冷，暴風雪加倍；火爐等級減緩
-  let decay = (1.1 + state.day * 0.18) * (state.blizzard > 0 ? 2.3 : 1);
-  decay *= Math.pow(0.93, state.furnaceLv - 1);
-  state.temp -= decay * dt;
-  if (state.temp <= 0) { state.temp = 0; state.phase = 'lose'; beep(150, .6, 'sawtooth', .07); return; }
+  // --- 玩家移動 ---
+  const pl = state.player;
+  let mx = 0, my = 0;
+  if (keys['w'] || keys['arrowup']) my -= 1;
+  if (keys['s'] || keys['arrowdown']) my += 1;
+  if (keys['a'] || keys['arrowleft']) mx -= 1;
+  if (keys['d'] || keys['arrowright']) mx += 1;
+  if (joy) {
+    const d = Math.hypot(joy.dx, joy.dy);
+    if (d > 8) { mx = joy.dx / d; my = joy.dy / d; }
+  }
+  const ml = Math.hypot(mx, my);
+  if (ml > 0) {
+    mx /= ml; my /= ml;
+    const sp = 150;
+    pl.x = Math.max(16, Math.min(W - 16, pl.x + mx * sp * dt));
+    pl.y = Math.max(40, Math.min(H - 20, pl.y + my * sp * dt));
+    pl.walk += dt * 10;
+    if (Math.abs(mx) > .1) pl.fx = mx > 0 ? 1 : -1;
+  }
+  pl.grabCd -= dt; pl.dropCd -= dt;
 
-  // 冰封生還者出現
-  state.iceTimer -= dt;
-  if (state.iceTimer <= 0) { spawnIce(); state.iceTimer = 14 + Math.random() * 8; }
+  // --- 排隊邏輯 ---
+  const queue = state.patients.filter(p => p.state === 'queue').sort((a, b) => a.queueIdx - b.queueIdx);
+  // 重新整理隊伍編號
+  queue.forEach((p, i) => { p.queueIdx = i; });
+  let nextIdx = queue.length;
+  for (const p of state.patients) {
+    if (p.state === 'walkToQueue' && p.queueIdx >= nextIdx) nextIdx = p.queueIdx + 1;
+  }
 
-  // 保持樹的數量
-  while (state.trees.length < 5 + Math.min(state.day, 3)) spawnTree();
-
-  // 生還者 AI
-  for (const s of state.survivors) {
-    s.bob += dt * 6;
-    if (s.state === 'idle') {
-      // 自動找最近沒人砍的樹
-      let best = null, bd = 1e9;
-      for (const t of state.trees) {
-        let taken = false;
-        for (const o of state.survivors) if (o !== s && o.tree === t) taken = true;
-        if (taken) continue;
-        const d = Math.hypot(s.x - t.x, s.y - t.y);
-        if (d < bd) { bd = d; best = t; }
+  for (const p of state.patients) {
+    p.bob += dt * 6;
+    if (p.state === 'walkToQueue') {
+      if (p.queueIdx < 0) p.queueIdx = nextIdx++;
+      const t = queuePos(p.queueIdx);
+      const dx = t.x - p.x, dy = t.y - p.y, d = Math.hypot(dx, dy);
+      if (d < 3) p.state = 'queue';
+      else { p.x += dx / d * 65 * dt; p.y += dy / d * 65 * dt; }
+      p.cold += dt;
+    } else if (p.state === 'queue') {
+      const t = queuePos(p.queueIdx);
+      const dx = t.x - p.x, dy = t.y - p.y, d = Math.hypot(dx, dy);
+      if (d > 3) { p.x += dx / d * 65 * dt; p.y += dy / d * 65 * dt; }
+      p.cold += dt;
+      if (p.cold >= COLD_LIMIT) {
+        p.state = 'frozen'; p.frozenT = 0;
+        state.frozen++;
+        addFloat(p.x, p.y - 30, '🥶 凍僵了…', '#9fd4ff');
+        beep(180, .25, 'sawtooth', .05);
+        if (state.frozen >= MAX_FROZEN) { state.phase = 'lose'; return; }
       }
-      if (best) {
-        s.state = 'walk'; s.tree = best;
-        s.tx = best.x + (s.x < best.x ? -22 : 22); s.ty = best.y + 6;
+    } else if (p.state === 'carried') {
+      const c = p.carrier;
+      const idx = c.carry.indexOf(p);
+      p.x = c.x; p.y = c.y - 30 - idx * 16;
+    } else if (p.state === 'bed') {
+      // 由病床計時
+    } else if (p.state === 'toDesk') {
+      const dx = DESK.x - p.x, dy = DESK.y - p.y, d = Math.hypot(dx, dy);
+      if (d < 6) { p.state = 'pay'; p.payT = 0.4; }
+      else { p.x += dx / d * 95 * dt; p.y += dy / d * 95 * dt; }
+    } else if (p.state === 'pay') {
+      p.payT -= dt;
+      if (p.payT <= 0) {
+        for (let i = 0; i < PAY / BILL_VAL; i++) {
+          bills.push({ x: DESK.x - 26 + Math.random() * 8, y: DESK.y - 8, h: bills.length });
+        }
+        addFloat(DESK.x, DESK.y - 46, '+$' + PAY, '#7aff9d');
+        beep(900, .08, 'sine', .05);
+        p.state = 'leave';
       }
-    } else if (s.state === 'walk') {
-      if (!s.tree || s.tree.wood <= 0 || state.trees.indexOf(s.tree) < 0) { s.state = 'idle'; s.tree = null; continue; }
-      const dx = s.tx - s.x, dy = s.ty - s.y, d = Math.hypot(dx, dy);
-      const sp = 70;
-      if (d < 4) { s.state = 'chop'; s.chopTimer = 0; }
-      else { s.x += dx / d * sp * dt; s.y += dy / d * sp * dt; }
-    } else if (s.state === 'chop') {
-      if (!s.tree || s.tree.wood <= 0 || state.trees.indexOf(s.tree) < 0) { s.state = 'idle'; s.tree = null; continue; }
-      s.chopTimer += dt;
-      if (s.chopTimer >= 0.9) {
-        s.chopTimer = 0;
-        s.tree.wood--; s.tree.shake = 0.2;
-        state.wood++; state.chopped++;
-        addFloat(s.tree.x, s.tree.y - 50, '🪵+1', '#e8c98a');
-        if (Math.random() < .5) beep(300 + Math.random() * 80, .05, 'triangle', .03);
-        if (s.tree.wood <= 0) {
-          burst(s.tree.x, s.tree.y - 20, '#8a6b3c', 12);
-          state.trees.splice(state.trees.indexOf(s.tree), 1);
-          s.tree = null; s.state = 'idle';
-          spawnTree();
+    } else if (p.state === 'leave') {
+      const dx = EXIT.x - p.x, dy = EXIT.y - p.y, d = Math.hypot(dx, dy);
+      p.x += dx / d * 95 * dt; p.y += dy / d * 95 * dt;
+    } else if (p.state === 'frozen') {
+      p.frozenT += dt;
+    }
+  }
+  state.patients = state.patients.filter(p =>
+    !(p.state === 'leave' && p.y > H + 30) && !(p.state === 'frozen' && p.frozenT > 2.5));
+
+  // --- 撿病人（玩家在圍欄附近）---
+  const nearPen = pl.x > PEN.x - 28 && pl.x < PEN.x + PEN.w + 28 && pl.y > PEN.y - 28 && pl.y < PEN.y + PEN.h + 40;
+  if (nearPen && pl.grabCd <= 0 && pl.carry.length < carryCap()) {
+    const q = state.patients.filter(p => p.state === 'queue' || p.state === 'walkToQueue')
+      .sort((a, b) => b.cold - a.cold)[0];
+    if (q) {
+      q.state = 'carried'; q.carrier = pl; q.queueIdx = -1;
+      pl.carry.push(q);
+      pl.grabCd = 0.22;
+      beep(620, .06, 'sine', .04);
+    }
+  }
+  // --- 放病人到病床 ---
+  if (pl.carry.length > 0 && pl.dropCd <= 0) {
+    for (const b of state.beds) {
+      if (!b.unlocked || b.patient) continue;
+      if (Math.hypot(pl.x - b.x, pl.y - b.y) < 48) {
+        const p = pl.carry.shift();
+        p.state = 'bed'; p.carrier = null; p.bed = b;
+        p.x = b.x; p.y = b.y - 6;
+        b.patient = p; b.progress = 0;
+        pl.dropCd = 0.2;
+        beep(740, .06, 'sine', .04);
+        break;
+      }
+    }
+  }
+
+  // --- 病床治療 ---
+  for (const b of state.beds) {
+    if (!b.patient) continue;
+    b.progress += dt / healTime();
+    if (b.progress >= 1) {
+      const p = b.patient;
+      b.patient = null;
+      p.state = 'toDesk'; p.bed = null;
+      state.cured++;
+      addFloat(b.x, b.y - 40, '✚ 治癒！', '#7aff9d');
+      beep(660, .08, 'sine', .05); beep(990, .12, 'sine', .05);
+      if (state.cured >= GOAL_CURED) { state.phase = 'win'; return; }
+    }
+  }
+
+  // --- 護士 AI ---
+  for (const n of state.nurses) {
+    n.walk += dt * 8;
+    if (n.state === 'toPen') {
+      const tx = PEN.x + PEN.w / 2, ty = PEN.y + PEN.h + 14;
+      const dx = tx - n.x, dy = ty - n.y, d = Math.hypot(dx, dy);
+      if (d < 10) {
+        const q = state.patients.filter(p => p.state === 'queue' || p.state === 'walkToQueue')
+          .sort((a, b) => b.cold - a.cold)[0];
+        if (q && freeBed()) {
+          q.state = 'carried'; q.carrier = n; q.queueIdx = -1;
+          n.carry.push(q);
+          const b = freeBed();
+          b.incoming = true; n.targetBed = b;
+          n.state = 'toBed';
+        }
+      } else { n.x += dx / d * 95 * dt; n.y += dy / d * 95 * dt; }
+    } else if (n.state === 'toBed') {
+      const b = n.targetBed;
+      if (!b || b.patient) { // 床被占了，重找
+        if (b) b.incoming = false;
+        const nb = freeBed();
+        if (nb) { nb.incoming = true; n.targetBed = nb; }
+        else { // 沒床，原地等
+          n.targetBed = null;
+        }
+        if (!n.targetBed) { n.state = 'wait'; continue; }
+      }
+      const dx = n.targetBed.x - n.x, dy = n.targetBed.y - n.y, d = Math.hypot(dx, dy);
+      if (d < 40) {
+        const p = n.carry.shift();
+        const b2 = n.targetBed;
+        p.state = 'bed'; p.carrier = null; p.bed = b2;
+        p.x = b2.x; p.y = b2.y - 6;
+        b2.patient = p; b2.progress = 0; b2.incoming = false;
+        n.targetBed = null; n.state = 'toPen';
+      } else { n.x += dx / d * 95 * dt; n.y += dy / d * 95 * dt; }
+    } else if (n.state === 'wait') {
+      if (freeBed() && n.carry.length > 0) {
+        const b = freeBed(); b.incoming = true; n.targetBed = b; n.state = 'toBed';
+      } else if (n.carry.length === 0) n.state = 'toPen';
+    }
+  }
+
+  // --- 收銀台收錢 ---
+  if (bills.length > 0 && Math.hypot(pl.x - DESK.x, pl.y - DESK.y) < 55) {
+    let take = 0;
+    while (bills.length > 0 && take < Math.max(2, Math.ceil(bills.length * 0.15))) {
+      const b = bills.pop();
+      flyBills.push({ x: b.x, y: DESK.y - 14 - b.h * 3, t: 0 });
+      take++;
+    }
+    if (take > 0) beep(1100 + Math.random() * 200, .05, 'sine', .04);
+  }
+  for (let i = flyBills.length - 1; i >= 0; i--) {
+    const f = flyBills[i];
+    f.t += dt * 3.2;
+    if (f.t >= 1) { flyBills.splice(i, 1); state.money += BILL_VAL; }
+  }
+
+  // --- 升級地板格 ---
+  for (const pad of PADS) {
+    const lv = state.upgLv[pad.key];
+    const costs = UPG[pad.key].costs;
+    if (lv >= costs.length) continue;
+    if (Math.hypot(pl.x - pad.x, pl.y - pad.y) < 42 && state.money > 0) {
+      const cost = costs[lv];
+      const paid = state.padPaid[pad.key] || 0;
+      const pay = Math.min(state.money, 60 * dt, cost - paid);
+      if (pay > 0) {
+        state.money -= pay;
+        state.padPaid[pad.key] = paid + pay;
+        if (state.padPaid[pad.key] >= cost - 0.01) {
+          state.padPaid[pad.key] = 0;
+          state.upgLv[pad.key]++;
+          applyUpgrade(pad.key);
         }
       }
     }
   }
 
-  // 動畫雜項
-  if (state.fireAnim > 0) state.fireAnim -= dt * 2;
-  for (const t of state.trees) if (t.shake > 0) t.shake -= dt;
-  for (const b of state.ices) if (b.shake > 0) b.shake -= dt;
-
-  // 雪
-  const wind = state.blizzard > 0 ? 120 : 15;
+  // --- 雪 ---
   for (const f of snow) {
-    f.y += f.v * dt * (state.blizzard > 0 ? 2.2 : 1);
-    f.x += Math.sin(f.y * .02) * 20 * dt + wind * dt;
+    f.y += f.v * dt;
+    f.x += Math.sin(f.y * .02) * 14 * dt;
     if (f.y > H) { f.y = -5; f.x = Math.random() * W; }
-    if (f.x > W) f.x -= W;
-  }
-  // 粒子
-  for (let i = particles.length - 1; i >= 0; i--) {
-    const p = particles[i];
-    p.life -= dt;
-    if (p.life <= 0) { particles.splice(i, 1); continue; }
-    p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 150 * dt;
   }
   for (let i = floatTexts.length - 1; i >= 0; i--) {
     const f = floatTexts[i];
-    f.life -= dt * 0.8; f.y -= 30 * dt;
+    f.life -= dt * 0.8; f.y -= 28 * dt;
     if (f.life <= 0) floatTexts.splice(i, 1);
   }
+}
+
+function applyUpgrade(key) {
+  if (key === 'bed') {
+    const b = state.beds.find(b => !b.unlocked);
+    if (b) b.unlocked = true;
+    addFloat(W / 2, 300, '🛏️ 新病床啟用！', '#7ad4ff', 20);
+  } else if (key === 'carry') {
+    addFloat(state.player.x, state.player.y - 60, '💪 一次可搬 ' + carryCap() + ' 人！', '#ffd24a', 18);
+  } else if (key === 'nurse') {
+    state.nurses.push({ x: DESK.x, y: DESK.y - 40, carry: [], state: 'toPen', targetBed: null, walk: 0 });
+    addFloat(W / 2, 300, '🧑‍⚕️ 護士加入！自動搬運病人', '#7aff9d', 18);
+  } else if (key === 'heal') {
+    addFloat(W / 2, 300, '💉 治療速度提升！', '#ff9dd4', 18);
+  }
+  beep(660, .1, 'sine', .06); beep(990, .18, 'sine', .06);
 }
 
 // ===== 繪圖 =====
@@ -367,210 +442,280 @@ function roundRect(x, y, w, h, r) {
   ctx.closePath();
 }
 
-function drawTree(t) {
-  const sh = t.shake > 0 ? Math.sin(t.shake * 60) * 3 : 0;
+function drawPerson(x, y, opt) {
+  // opt: {sick, frozen, healed, coat, bob, walk, medic, fx}
+  const bob = Math.sin(opt.bob || 0) * 1.2 + (opt.walk ? Math.sin(opt.walk) * 1.5 : 0);
   ctx.save();
-  ctx.translate(t.x + sh, t.y);
-  // 影子
-  ctx.fillStyle = 'rgba(40,70,110,.25)';
-  ctx.beginPath(); ctx.ellipse(0, 4, 26, 8, 0, 0, 6.28); ctx.fill();
-  // 樹幹
-  ctx.fillStyle = '#6b4a2a';
-  ctx.fillRect(-5, -18, 10, 22);
-  // 三層雪杉
-  const g = Math.max(0.35, t.wood / TREE_WOOD);
-  for (let i = 0; i < 3; i++) {
-    const w = (34 - i * 8) * g + 8, yy = -14 - i * 16;
-    ctx.fillStyle = '#1e5c3a';
-    ctx.beginPath(); ctx.moveTo(-w, yy); ctx.lineTo(w, yy); ctx.lineTo(0, yy - 22); ctx.closePath(); ctx.fill();
-    ctx.fillStyle = 'rgba(235,245,255,.85)';
-    ctx.beginPath(); ctx.moveTo(-w * .7, yy - 8); ctx.lineTo(w * .7, yy - 8); ctx.lineTo(0, yy - 22); ctx.closePath(); ctx.fill();
+  ctx.translate(x, y + bob);
+  ctx.fillStyle = 'rgba(40,70,110,.22)';
+  ctx.beginPath(); ctx.ellipse(0, 11, 10, 3.5, 0, 0, 6.28); ctx.fill();
+  // 身體
+  ctx.fillStyle = opt.frozen ? '#7ab8e0' : (opt.medic ? '#f0f4f8' : (opt.coat || '#a8423c'));
+  roundRect(-7, -10, 14, 21, 5); ctx.fill();
+  if (opt.medic) { // 紅十字
+    ctx.fillStyle = '#e04848';
+    ctx.fillRect(-1.5, -6, 3, 9); ctx.fillRect(-4.5, -3, 9, 3);
+  }
+  // 頭
+  ctx.fillStyle = opt.frozen ? '#9fd0ec' : (opt.sick ? '#e88a6a' : '#f2c9a0');
+  ctx.beginPath(); ctx.arc(0, -16, 6.5, 0, 6.28); ctx.fill();
+  // 毛帽
+  ctx.fillStyle = opt.frozen ? '#c8e8fa' : (opt.medic ? '#e04848' : '#e8eef5');
+  ctx.beginPath(); ctx.arc(0, -18.5, 6.5, 3.3, 6.1); ctx.fill();
+  if (opt.sick && !opt.frozen) {
+    // 口罩
+    ctx.fillStyle = '#fff';
+    roundRect(-4.5, -16, 9, 5.5, 2); ctx.fill();
+    // 發燒紅暈
+    ctx.fillStyle = 'rgba(220,60,60,.5)';
+    ctx.beginPath(); ctx.arc(-4, -14.5, 1.6, 0, 6.28); ctx.arc(4, -14.5, 1.6, 0, 6.28); ctx.fill();
+  } else if (opt.healed) {
+    ctx.strokeStyle = '#7a4a2a'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.arc(0, -15, 3, 0.3, 2.84); ctx.stroke(); // 微笑
+    ctx.fillStyle = '#5a3a1a';
+    ctx.beginPath(); ctx.arc(-2.4, -17, .9, 0, 6.28); ctx.arc(2.4, -17, .9, 0, 6.28); ctx.fill();
+  }
+  if (opt.frozen) {
+    ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.lineWidth = 1;
+    ctx.strokeRect(-9, -26, 18, 38);
   }
   ctx.restore();
 }
 
-function drawIce(b) {
-  const sh = b.shake > 0 ? Math.sin(b.shake * 70) * 3 : 0;
-  ctx.save();
-  ctx.translate(b.x + sh, b.y);
-  ctx.fillStyle = 'rgba(40,70,110,.25)';
-  ctx.beginPath(); ctx.ellipse(0, 18, 24, 7, 0, 0, 6.28); ctx.fill();
-  // 冰塊
-  ctx.fillStyle = 'rgba(150,210,255,.8)';
-  roundRect(-22, -28, 44, 48, 8); ctx.fill();
-  ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.lineWidth = 2;
-  roundRect(-22, -28, 44, 48, 8); ctx.stroke();
-  // 裂痕
-  ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.lineWidth = 1.5;
-  for (let i = ICE_TAPS; i > b.taps; i--) {
-    ctx.beginPath();
-    ctx.moveTo(-14 + i * 7, -24);
-    ctx.lineTo(-8 + i * 5, -4 + i * 3);
-    ctx.lineTo(-16 + i * 8, 16);
-    ctx.stroke();
+function drawBillStack(x, y, n, max) {
+  const show = Math.min(n, max || 24);
+  for (let i = 0; i < show; i++) {
+    const yy = y - i * 3;
+    ctx.fillStyle = i % 2 ? '#3fae5c' : '#4cc96e';
+    roundRect(x - 11, yy - 3, 22, 5, 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,.5)';
+    ctx.fillRect(x - 3, yy - 2, 6, 3);
   }
-  // 裡面的人影
-  ctx.fillStyle = 'rgba(30,50,80,.55)';
-  ctx.beginPath(); ctx.arc(0, -12, 7, 0, 6.28); ctx.fill();
-  roundRect(-8, -6, 16, 22, 5); ctx.fill();
-  // 提示
+}
+
+function drawTruck(t) {
+  ctx.save();
+  ctx.translate(t.x, ROAD_Y);
+  ctx.fillStyle = 'rgba(40,70,110,.25)';
+  ctx.beginPath(); ctx.ellipse(0, 22, 56, 8, 0, 0, 6.28); ctx.fill();
+  // 車斗
+  ctx.fillStyle = '#2a5d9e';
+  roundRect(-58, -14, 70, 30, 5); ctx.fill();
+  ctx.fillStyle = '#1e4a82';
+  roundRect(-58, -14, 70, 8, 4); ctx.fill();
+  // 車斗裡的病人
+  if (t.patientsLeft > 0) {
+    for (let i = 0; i < Math.min(t.patientsLeft, 4); i++) {
+      drawPerson(-44 + i * 16, -16, { sick: true, bob: i * 1.7 + performance.now() / 200 });
+    }
+  }
+  // 車頭
+  ctx.fillStyle = '#3a78c2';
+  roundRect(12, -22, 44, 38, 7); ctx.fill();
+  ctx.fillStyle = '#bfe0f5';
+  roundRect(34, -16, 16, 14, 3); ctx.fill();
+  // 輪子
+  ctx.fillStyle = '#222';
+  for (const wx of [-40, -10, 36]) { ctx.beginPath(); ctx.arc(wx, 18, 8, 0, 6.28); ctx.fill(); }
+  ctx.fillStyle = '#888';
+  for (const wx of [-40, -10, 36]) { ctx.beginPath(); ctx.arc(wx, 18, 3.5, 0, 6.28); ctx.fill(); }
+  ctx.restore();
+}
+
+function drawBed(b) {
+  ctx.save();
+  ctx.translate(b.x, b.y);
+  ctx.fillStyle = 'rgba(40,70,110,.18)';
+  ctx.beginPath(); ctx.ellipse(0, 30, 28, 8, 0, 0, 6.28); ctx.fill();
+  // 床架
+  ctx.fillStyle = '#8a93a6';
+  roundRect(-24, -28, 48, 60, 8); ctx.fill();
+  // 床墊
+  ctx.fillStyle = '#e8f6f8';
+  roundRect(-20, -24, 40, 52, 6); ctx.fill();
+  // 棉被
+  ctx.fillStyle = '#5fc8d4';
+  roundRect(-20, -2, 40, 30, 6); ctx.fill();
+  // 枕頭
   ctx.fillStyle = '#fff';
-  ctx.font = 'bold 13px sans-serif'; ctx.textAlign = 'center';
-  ctx.fillText('點擊敲冰 ' + b.taps, 0, -38);
+  roundRect(-13, -21, 26, 12, 4); ctx.fill();
+  if (b.patient) {
+    // 病人躺著（頭在枕頭）
+    const p = b.patient;
+    ctx.fillStyle = p ? '#e88a6a' : '#f2c9a0';
+    ctx.beginPath(); ctx.arc(0, -14, 7, 0, 6.28); ctx.fill();
+    ctx.fillStyle = '#fff';
+    roundRect(-4.5, -13, 9, 5, 2); ctx.fill();
+    // 治療進度
+    ctx.fillStyle = 'rgba(0,0,0,.35)';
+    roundRect(-22, -40, 44, 8, 4); ctx.fill();
+    ctx.fillStyle = '#7aff9d';
+    if (b.progress > 0.05) { roundRect(-22, -40, 44 * Math.min(b.progress, 1), 8, 4); ctx.fill(); }
+    // 治療愛心
+    if (Math.sin(performance.now() / 200) > 0) {
+      ctx.font = '12px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('💗', 16, -30);
+    }
+  }
   ctx.restore();
 }
 
-function drawSurvivor(s) {
-  const bob = (s.state === 'walk') ? Math.sin(s.bob * 2) * 2 : 0;
-  const swing = (s.state === 'chop') ? Math.sin(s.chopTimer / 0.9 * 6.28) : 0;
+function drawScene() {
+  // 雪地
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#dbe7f2');
+  g.addColorStop(1, '#c4d6e8');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+
+  // 道路
+  ctx.fillStyle = '#aebccc';
+  ctx.fillRect(0, ROAD_Y - 4, W, 52);
+  ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = 3;
+  ctx.setLineDash([16, 14]);
+  ctx.beginPath(); ctx.moveTo(0, ROAD_Y + 22); ctx.lineTo(W, ROAD_Y + 22); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // 裝飾雪樹
+  for (const [tx, ty] of [[30, 200], [30, 560], [395, 250], [395, 560], [40, 420]]) {
+    ctx.fillStyle = '#2a6647';
+    ctx.beginPath(); ctx.moveTo(tx - 14, ty); ctx.lineTo(tx + 14, ty); ctx.lineTo(tx, ty - 30); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(240,248,255,.9)';
+    ctx.beginPath(); ctx.moveTo(tx - 9, ty - 12); ctx.lineTo(tx + 9, ty - 12); ctx.lineTo(tx, ty - 30); ctx.closePath(); ctx.fill();
+  }
+
+  // 病房地板
+  ctx.fillStyle = '#b88a8a';
+  roundRect(30, 286, 360, 220, 12); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,.12)';
+  for (let i = 0; i < 6; i++) ctx.fillRect(30, 286 + i * 38, 360, 2);
+  ctx.fillStyle = 'rgba(255,255,255,.85)';
+  ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'left';
+  ctx.fillText('🏥 治療區', 40, 304);
+
+  // 候診圍欄
+  ctx.fillStyle = 'rgba(120,150,185,.18)';
+  roundRect(PEN.x - 8, PEN.y - 8, PEN.w + 16, PEN.h + 16, 10); ctx.fill();
+  ctx.strokeStyle = '#8a6b46'; ctx.lineWidth = 5;
+  roundRect(PEN.x - 8, PEN.y - 8, PEN.w + 16, PEN.h + 16, 10); ctx.stroke();
+  ctx.strokeStyle = '#a8855c'; ctx.lineWidth = 2;
+  roundRect(PEN.x - 8, PEN.y - 8, PEN.w + 16, PEN.h + 16, 10); ctx.stroke();
+  ctx.fillStyle = '#5a4a36';
+  ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText('🤒 候診區', PEN.x + PEN.w / 2, PEN.y - 16);
+
+  // 收銀台
   ctx.save();
-  ctx.translate(s.x, s.y + bob);
-  ctx.fillStyle = 'rgba(40,70,110,.25)';
-  ctx.beginPath(); ctx.ellipse(0, 12, 12, 4, 0, 0, 6.28); ctx.fill();
-  // 身體（大衣）
-  ctx.fillStyle = s.coat;
-  roundRect(-8, -12, 16, 24, 6); ctx.fill();
-  // 頭+毛帽
-  ctx.fillStyle = '#f2c9a0';
-  ctx.beginPath(); ctx.arc(0, -18, 7, 0, 6.28); ctx.fill();
-  ctx.fillStyle = '#e8eef5';
-  ctx.beginPath(); ctx.arc(0, -21, 7, 3.34, 6.08); ctx.fill();
-  // 斧頭
-  if (s.state === 'chop') {
+  ctx.translate(DESK.x, DESK.y);
+  ctx.fillStyle = 'rgba(40,70,110,.2)';
+  ctx.beginPath(); ctx.ellipse(0, 16, 40, 9, 0, 0, 6.28); ctx.fill();
+  ctx.fillStyle = '#7a5a3c';
+  roundRect(-44, -10, 88, 26, 7); ctx.fill();
+  ctx.fillStyle = '#94704c';
+  roundRect(-44, -14, 88, 10, 5); ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText('💵 收費台', 0, 32);
+  ctx.restore();
+  // 鈔票堆
+  if (bills.length > 0) {
+    drawBillStack(DESK.x - 24, DESK.y - 18, bills.length, 26);
+    if (bills.length > 26) {
+      ctx.fillStyle = '#2a7a42';
+      ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('x' + bills.length, DESK.x - 24, DESK.y - 18 - 26 * 3 - 8);
+    }
+  }
+}
+
+function drawPads() {
+  ctx.textAlign = 'center';
+  for (const pad of PADS) {
+    const def = UPG[pad.key];
+    const lv = state.upgLv[pad.key];
+    const maxed = lv >= def.costs.length;
+    const cost = maxed ? 0 : def.costs[lv];
+    const paid = state.padPaid[pad.key] || 0;
+
     ctx.save();
-    ctx.translate(9, -8); ctx.rotate(swing * 0.9 - 0.4);
-    ctx.fillStyle = '#8a6b3c'; ctx.fillRect(0, -2, 16, 4);
-    ctx.fillStyle = '#b8c4d0';
-    ctx.beginPath(); ctx.moveTo(16, -7); ctx.lineTo(23, 0); ctx.lineTo(16, 7); ctx.closePath(); ctx.fill();
+    ctx.translate(pad.x, pad.y);
+    ctx.fillStyle = maxed ? 'rgba(120,140,160,.35)' : 'rgba(40,120,200,.85)';
+    roundRect(-44, -30, 88, 62, 12); ctx.fill();
+    if (!maxed && paid > 0) {
+      ctx.fillStyle = 'rgba(122,255,157,.45)';
+      roundRect(-44, -30, 88 * Math.min(paid / cost, 1), 62, 12); ctx.fill();
+    }
+    ctx.strokeStyle = 'rgba(255,255,255,.6)'; ctx.lineWidth = 2;
+    roundRect(-44, -30, 88, 62, 12); ctx.stroke();
+    ctx.fillStyle = '#fff';
+    ctx.font = '18px sans-serif';
+    ctx.fillText(def.icon, 0, -8);
+    ctx.font = 'bold 12px sans-serif';
+    ctx.fillText(def.label, 0, 9);
+    ctx.font = 'bold 12px sans-serif';
+    ctx.fillStyle = maxed ? '#cfd8e2' : '#ffe27a';
+    ctx.fillText(maxed ? 'MAX' : '$' + Math.ceil(cost - paid), 0, 26);
     ctx.restore();
   }
-  ctx.restore();
-}
-
-function drawFurnace() {
-  const lv = state.furnaceLv;
-  const fx = FURNACE.x, fy = FURNACE.y;
-  const flick = 1 + Math.sin(performance.now() / 90) * .08 + state.fireAnim * .3;
-  const heat = Math.max(0.15, state.temp / maxTemp());
-
-  // 暖光圈
-  const rad = (90 + lv * 25) * heat * flick;
-  const grad = ctx.createRadialGradient(fx, fy - 15, 10, fx, fy - 15, rad);
-  grad.addColorStop(0, 'rgba(255,160,60,.35)');
-  grad.addColorStop(1, 'rgba(255,160,60,0)');
-  ctx.fillStyle = grad;
-  ctx.beginPath(); ctx.arc(fx, fy - 15, rad, 0, 6.28); ctx.fill();
-
-  ctx.save();
-  ctx.translate(fx, fy);
-  // 石爐
-  ctx.fillStyle = '#4a5566';
-  roundRect(-42, -8, 84, 30, 8); ctx.fill();
-  ctx.fillStyle = '#5d6a7d';
-  for (let i = -3; i <= 2; i++) { ctx.beginPath(); ctx.arc(i * 13 + 6, 8, 8, 0, 6.28); ctx.fill(); }
-  // 火焰
-  const fh = (30 + lv * 10) * heat * flick;
-  for (const [c, k] of [['#ff5c2a', 1], ['#ff9d3c', .72], ['#ffd24a', .45]]) {
-    ctx.fillStyle = c;
-    ctx.beginPath();
-    ctx.moveTo(-20 * k, -5);
-    ctx.quadraticCurveTo(-22 * k, -fh * k * .55, 0, -fh * k);
-    ctx.quadraticCurveTo(22 * k, -fh * k * .55, 20 * k, -5);
-    ctx.closePath(); ctx.fill();
-  }
-  // 等級牌
-  ctx.fillStyle = '#2c3848';
-  roundRect(-26, 24, 52, 18, 6); ctx.fill();
-  ctx.fillStyle = '#ffd24a';
-  ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'center';
-  ctx.fillText('火爐 Lv.' + lv, 0, 37);
-  ctx.restore();
+  ctx.fillStyle = 'rgba(60,80,105,.8)';
+  ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText('站在格子上自動付費升級', W / 2, 700);
 }
 
 function drawHUD() {
-  // 頂部面板
-  ctx.fillStyle = 'rgba(12,24,44,.78)';
-  roundRect(8, 8, W - 16, 86, 12); ctx.fill();
-
-  // 溫度條
-  const tw = W - 130;
-  const tr = state.temp / maxTemp();
-  ctx.font = '16px sans-serif'; ctx.textAlign = 'left';
+  ctx.fillStyle = 'rgba(12,24,44,.8)';
+  roundRect(8, 8, W - 16, 40, 10); ctx.fill();
+  ctx.font = 'bold 16px sans-serif'; ctx.textAlign = 'left';
+  ctx.fillStyle = '#7aff9d';
+  ctx.fillText('💵 $' + Math.floor(state.money), 20, 34);
   ctx.fillStyle = '#fff';
-  ctx.fillText('🌡️', 18, 36);
-  ctx.fillStyle = 'rgba(255,255,255,.15)';
-  roundRect(46, 20, tw, 20, 10); ctx.fill();
-  const tcol = tr > .5 ? '#ff9d3c' : (tr > .25 ? '#ffd24a' : '#ff5c5c');
-  ctx.fillStyle = tcol;
-  if (tr > 0.02) { roundRect(46, 20, Math.max(14, tw * tr), 20, 10); ctx.fill(); }
-  ctx.fillStyle = '#fff';
-  ctx.font = 'bold 13px sans-serif'; ctx.textAlign = 'center';
-  ctx.fillText(Math.ceil(state.temp) + '° / ' + maxTemp() + '°', 46 + tw / 2, 35);
+  ctx.fillText('✚ ' + state.cured + '/' + GOAL_CURED, 160, 34);
+  ctx.fillStyle = state.frozen >= MAX_FROZEN - 3 ? '#ff8a8a' : '#aac8e2';
+  ctx.fillText('🥶 ' + state.frozen + '/' + MAX_FROZEN, 280, 34);
 
-  // 第幾天
-  ctx.fillStyle = '#aee2ff';
-  ctx.font = 'bold 15px sans-serif'; ctx.textAlign = 'right';
-  ctx.fillText('第 ' + Math.min(state.day, WIN_DAY) + '/' + WIN_DAY + ' 天', W - 18, 36);
-
-  // 資源列
-  ctx.textAlign = 'left';
-  ctx.font = '16px sans-serif';
-  ctx.fillStyle = '#fff';
-  ctx.fillText('🪵 ' + state.wood, 18, 72);
-  ctx.fillText('👥 ' + state.survivors.length + '/' + MAX_SURVIVORS, 100, 72);
-  // 天數進度
-  const dw = 150;
-  ctx.fillStyle = 'rgba(255,255,255,.15)';
-  roundRect(W - 18 - dw, 58, dw, 14, 7); ctx.fill();
-  ctx.fillStyle = '#5cb8ff';
-  const dr = state.dayTime / DAY_LEN;
-  if (dr > 0.03) { roundRect(W - 18 - dw, 58, dw * dr, 14, 7); ctx.fill(); }
-
-  // 底部按鈕：添柴
-  ctx.fillStyle = state.wood > 0 ? '#c25b1e' : '#5a4a3c';
-  roundRect(10, H - 64, 120, 50, 12); ctx.fill();
-  ctx.fillStyle = '#fff';
-  ctx.font = 'bold 17px sans-serif'; ctx.textAlign = 'center';
-  ctx.fillText('🔥 添柴', 70, H - 42);
-  ctx.font = '11px sans-serif';
-  ctx.fillText('-3🪵 → +' + (3 * WOOD_HEAT) + '°', 70, H - 24);
-
-  // 底部按鈕：升級
-  const can = state.wood >= upgradeCost();
-  ctx.fillStyle = can ? '#1e7dc2' : '#3c4a5a';
-  roundRect(W - 130, H - 64, 120, 50, 12); ctx.fill();
-  ctx.fillStyle = '#fff';
-  ctx.font = 'bold 17px sans-serif';
-  ctx.fillText('⬆️ 升級火爐', W - 70, H - 42);
-  ctx.font = '11px sans-serif';
-  ctx.fillText(upgradeCost() + '🪵', W - 70, H - 24);
-
-  // 暴風雪提示
-  if (state.blizzardWarn > 0 && state.blizzard <= 0) {
-    ctx.fillStyle = 'rgba(255,80,80,' + (0.6 + Math.sin(performance.now() / 150) * 0.3) + ')';
-    ctx.font = 'bold 20px sans-serif';
-    ctx.fillText('⚠️ 暴風雪 ' + Math.ceil(state.nextBlizzard) + 's', W / 2, 130);
+  // 新手提示
+  if (state.phase === 'play' && state.time < 50) {
+    const pl = state.player;
+    let hint = null, hx = 0, hy = 0;
+    const queueN = state.patients.filter(p => p.state === 'queue' || p.state === 'walkToQueue').length;
+    if (pl.carry.length === 0 && queueN > 0) { hint = '⬆ 去候診區接病人'; hx = PEN.x + PEN.w / 2; hy = PEN.y + PEN.h + 34; }
+    else if (pl.carry.length > 0) { hint = '⬇ 放到空病床'; hx = W / 2; hy = 270; }
+    else if (bills.length > 4) { hint = '💵 去收費台收錢'; hx = DESK.x; hy = DESK.y - 60; }
+    if (hint) {
+      const a = 0.6 + Math.sin(performance.now() / 250) * 0.3;
+      ctx.fillStyle = 'rgba(20,40,70,' + a + ')';
+      ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center';
+      const tw = ctx.measureText(hint).width;
+      roundRect(hx - tw / 2 - 10, hy - 18, tw + 20, 26, 8); ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.fillText(hint, hx, hy);
+    }
   }
-  if (state.blizzard > 0) {
-    ctx.fillStyle = '#cfe8ff';
-    ctx.font = 'bold 20px sans-serif';
-    ctx.fillText('🌨️ 暴風雪中！溫度急降', W / 2, 130);
+
+  // 搖桿
+  if (joy) {
+    ctx.strokeStyle = 'rgba(255,255,255,.4)'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(joy.sx, joy.sy, 34, 0, 6.28); ctx.stroke();
+    const d = Math.hypot(joy.dx, joy.dy) || 1;
+    const k = Math.min(d, 32);
+    ctx.fillStyle = 'rgba(255,255,255,.45)';
+    ctx.beginPath(); ctx.arc(joy.sx + joy.dx / d * k, joy.sy + joy.dy / d * k, 16, 0, 6.28); ctx.fill();
   }
 }
 
-function drawOverlayPanel(title, lines, btnText, titleColor) {
-  ctx.fillStyle = 'rgba(6,14,30,.82)';
+function drawOverlay(title, lines, btnText, titleColor) {
+  ctx.fillStyle = 'rgba(6,14,30,.84)';
   ctx.fillRect(0, 0, W, H);
   ctx.textAlign = 'center';
   ctx.fillStyle = titleColor;
-  ctx.font = 'bold 34px sans-serif';
-  ctx.fillText(title, W / 2, 250);
+  ctx.font = 'bold 32px sans-serif';
+  ctx.fillText(title, W / 2, 240);
   ctx.fillStyle = '#dce8f5';
-  ctx.font = '16px sans-serif';
-  lines.forEach((l, i) => ctx.fillText(l, W / 2, 305 + i * 30));
+  ctx.font = '15px sans-serif';
+  lines.forEach((l, i) => ctx.fillText(l, W / 2, 295 + i * 28));
   const pulse = 1 + Math.sin(performance.now() / 300) * .04;
   ctx.save();
-  ctx.translate(W / 2, 520); ctx.scale(pulse, pulse);
+  ctx.translate(W / 2, 540); ctx.scale(pulse, pulse);
   ctx.fillStyle = '#c25b1e';
   roundRect(-100, -26, 200, 52, 14); ctx.fill();
   ctx.fillStyle = '#fff';
@@ -580,63 +725,57 @@ function drawOverlayPanel(title, lines, btnText, titleColor) {
 }
 
 function draw() {
-  // 背景：雪地
-  const night = Math.sin(state.dayTime / DAY_LEN * Math.PI); // 中午最亮
-  const sky = ctx.createLinearGradient(0, 0, 0, H);
-  sky.addColorStop(0, state.blizzard > 0 ? '#26344a' : '#3c5a82');
-  sky.addColorStop(.35, '#5a7aa6');
-  sky.addColorStop(.36, '#dfe9f4');
-  sky.addColorStop(1, '#c2d4e6');
-  ctx.fillStyle = sky;
-  ctx.fillRect(0, 0, W, H);
+  drawScene();
+  if (state.phase === 'play') drawPads();
 
-  // 遠山
-  ctx.fillStyle = 'rgba(160,185,215,.7)';
-  ctx.beginPath();
-  ctx.moveTo(0, 270);
-  ctx.lineTo(80, 190); ctx.lineTo(160, 255); ctx.lineTo(250, 175); ctx.lineTo(340, 250); ctx.lineTo(W, 200);
-  ctx.lineTo(W, 280); ctx.lineTo(0, 280);
-  ctx.closePath(); ctx.fill();
-
-  // 依 y 排序繪製場景物件
+  // 依 y 排序的場景物件
   const objs = [];
-  for (const t of state.trees) objs.push({ y: t.y, f: () => drawTree(t) });
-  for (const b of state.ices) objs.push({ y: b.y, f: () => drawIce(b) });
-  for (const s of state.survivors) objs.push({ y: s.y, f: () => drawSurvivor(s) });
-  objs.push({ y: FURNACE.y, f: drawFurnace });
+  for (const b of state.beds) if (b.unlocked) objs.push({ y: b.y + 30, f: () => drawBed(b) });
+  if (state.truck) objs.push({ y: ROAD_Y + 20, f: () => drawTruck(state.truck) });
+  for (const p of state.patients) {
+    if (p.state === 'bed' || p.state === 'carried') continue;
+    objs.push({ y: p.y, f: () => drawPerson(p.x, p.y, {
+      sick: p.state !== 'toDesk' && p.state !== 'pay' && p.state !== 'leave',
+      healed: p.state === 'toDesk' || p.state === 'pay' || p.state === 'leave',
+      frozen: p.state === 'frozen', bob: p.bob,
+      coat: '#a8423c'
+    }) });
+  }
+  for (const n of state.nurses) {
+    objs.push({ y: n.y, f: () => {
+      drawPerson(n.x, n.y, { medic: true, bob: n.walk, walk: n.walk });
+      n.carry.forEach((p, i) => drawPerson(n.x, n.y - 26 - i * 16, { sick: true, bob: p.bob }));
+    } });
+  }
+  const pl = state.player;
+  objs.push({ y: pl.y, f: () => {
+    drawPerson(pl.x, pl.y, { medic: true, bob: pl.walk, walk: pl.walk });
+    pl.carry.forEach((p, i) => drawPerson(pl.x, pl.y - 26 - i * 16, { sick: true, bob: p.bob }));
+    // 玩家標記
+    ctx.fillStyle = 'rgba(255,210,74,.95)';
+    ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText('▼', pl.x, pl.y - 34 - pl.carry.length * 16);
+  } });
   objs.sort((a, b) => a.y - b.y);
   for (const o of objs) o.f();
 
-  // 粒子
-  for (const p of particles) {
-    ctx.globalAlpha = Math.max(0, p.life * 2);
-    ctx.fillStyle = p.color;
-    ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
+  // 飛行鈔票
+  for (const f of flyBills) {
+    const x = f.x + (pl.x - f.x) * f.t;
+    const y = f.y + (pl.y - 20 - f.y) * f.t - Math.sin(f.t * Math.PI) * 30;
+    ctx.fillStyle = '#4cc96e';
+    roundRect(x - 9, y - 3, 18, 6, 2); ctx.fill();
   }
-  ctx.globalAlpha = 1;
 
   // 雪
-  ctx.fillStyle = 'rgba(255,255,255,.85)';
+  ctx.fillStyle = 'rgba(255,255,255,.8)';
   for (const f of snow) { ctx.beginPath(); ctx.arc(f.x, f.y, f.s, 0, 6.28); ctx.fill(); }
-
-  // 低溫結霜邊框
-  const cold = 1 - state.temp / 35;
-  if (cold > 0 && state.phase === 'play') {
-    const v = ctx.createRadialGradient(W / 2, H / 2, H * .3, W / 2, H / 2, H * .72);
-    v.addColorStop(0, 'rgba(140,190,255,0)');
-    v.addColorStop(1, 'rgba(140,190,255,' + Math.min(.75, cold * .8) + ')');
-    ctx.fillStyle = v;
-    ctx.fillRect(0, 0, W, H);
-  }
-  // 夜色
-  ctx.fillStyle = 'rgba(10,20,45,' + (0.22 * (1 - night)) + ')';
-  ctx.fillRect(0, 0, W, H);
 
   // 漂浮文字
   for (const f of floatTexts) {
     ctx.globalAlpha = Math.max(0, Math.min(1, f.life * 1.5));
     ctx.fillStyle = f.color;
-    ctx.font = 'bold 16px sans-serif'; ctx.textAlign = 'center';
+    ctx.font = 'bold ' + f.size + 'px sans-serif'; ctx.textAlign = 'center';
     ctx.fillText(f.text, f.x, f.y);
   }
   ctx.globalAlpha = 1;
@@ -644,34 +783,37 @@ function draw() {
   if (state.phase === 'play') drawHUD();
 
   if (state.phase === 'title') {
-    drawOverlayPanel('❄️ 寒霜求生 ❄️', [
-      '寒冬末日，火爐是唯一的希望。',
+    drawOverlay('❄️ 寒霜診所 ❄️', [
+      '暴風雪中，卡車不斷送來生病的生還者。',
       '',
-      '🌲 點樹砍柴　🔥 點火爐/添柴保溫',
-      '🧊 點冰塊敲開，救出生還者',
-      '⬆️ 升級火爐抵抗暴風雪',
+      '🕹️ 拖曳螢幕（或 WASD）移動醫生',
+      '🤒 走進候診區自動抱起病人',
+      '🛏️ 走到空病床自動放下治療',
+      '💵 治癒後病人付費，走到收費台收錢',
+      '🔵 站上藍色地板格購買升級',
       '',
-      '撐過 ' + WIN_DAY + ' 天就獲勝！溫度歸零就全滅…'
+      '治癒 ' + GOAL_CURED + ' 人獲勝；凍僵 ' + MAX_FROZEN + ' 人就失敗！'
     ], '點擊開始', '#aee2ff');
     ctx.fillStyle = 'rgba(255,255,255,.45)';
     ctx.font = '12px sans-serif'; ctx.textAlign = 'center';
-    ctx.fillText('靈感來自《寒霜啟示錄》廣告小遊戲', W / 2, H - 30);
+    ctx.fillText('靈感來自《寒霜啟示錄》廣告小遊戲', W / 2, H - 26);
   } else if (state.phase === 'win') {
-    drawOverlayPanel('🏆 生存成功！', [
-      '你帶領 ' + state.survivors.length + ' 名生還者撐過了 ' + WIN_DAY + ' 天寒冬！',
+    drawOverlay('🏆 診所大成功！', [
+      '你治癒了 ' + state.cured + ' 名生還者！',
       '',
-      '🪵 共砍伐木柴：' + state.chopped,
-      '🙌 救出生還者：' + state.rescued,
-      '🔥 火爐等級：Lv.' + state.furnaceLv
+      '💵 結餘現金：$' + Math.floor(state.money),
+      '🥶 凍僵人數：' + state.frozen,
+      '🛏️ 病床數：' + state.beds.filter(b => b.unlocked).length,
+      '🧑‍⚕️ 護士：' + state.nurses.length + ' 名'
     ], '再玩一次', '#ffd24a');
   } else if (state.phase === 'lose') {
-    drawOverlayPanel('💀 火爐熄滅了…', [
-      '營地在第 ' + state.day + ' 天的寒夜中沉寂。',
+    drawOverlay('💀 診所倒閉了…', [
+      '太多生還者在候診區凍僵了。',
       '',
-      '🪵 共砍伐木柴：' + state.chopped,
-      '🙌 救出生還者：' + state.rescued,
+      '✚ 已治癒：' + state.cured + ' 人',
       '',
-      '訣竅：留足木柴應付暴風雪，及早升級火爐！'
+      '訣竅：優先加開病床、雇護士，',
+      '別讓隊伍排太長！'
     ], '重新開始', '#ff8a8a');
   }
 }
