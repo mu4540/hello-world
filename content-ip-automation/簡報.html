@@ -1,0 +1,588 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>晚風值班室・Claude Agent 工作流手冊</title>
+<style>
+:root{
+  --bg:#eef0f4; --card:#ffffff; --ink:#212936; --muted:#5c6577; --line:#d9dde5;
+  --accent:#a06413; --accent-ink:#7c4d0d; --accent-soft:rgba(190,130,40,.12);
+  --danger:#b23a30; --danger-soft:rgba(178,58,48,.09);
+  --ok:#2e7d4f; --ok-soft:rgba(46,125,79,.10);
+  --agent:#3d5aa8; --agent-soft:rgba(61,90,168,.10);
+  --code-bg:#f4f1ea; --shadow:0 10px 30px rgba(25,32,48,.10);
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#0d1220; --card:#171e2f; --ink:#e9e6dd; --muted:#96a0b5; --line:#2b3450;
+    --accent:#e6a84e; --accent-ink:#f0bd74; --accent-soft:rgba(230,168,78,.13);
+    --danger:#e0796a; --danger-soft:rgba(224,121,106,.12);
+    --ok:#82c096; --ok-soft:rgba(130,192,150,.12);
+    --agent:#8ea8e8; --agent-soft:rgba(142,168,232,.13);
+    --code-bg:#111827; --shadow:0 12px 34px rgba(0,0,0,.45);
+  }
+}
+:root[data-theme="light"]{
+  --bg:#eef0f4; --card:#ffffff; --ink:#212936; --muted:#5c6577; --line:#d9dde5;
+  --accent:#a06413; --accent-ink:#7c4d0d; --accent-soft:rgba(190,130,40,.12);
+  --danger:#b23a30; --danger-soft:rgba(178,58,48,.09);
+  --ok:#2e7d4f; --ok-soft:rgba(46,125,79,.10);
+  --agent:#3d5aa8; --agent-soft:rgba(61,90,168,.10);
+  --code-bg:#f4f1ea; --shadow:0 10px 30px rgba(25,32,48,.10);
+}
+:root[data-theme="dark"]{
+  --bg:#0d1220; --card:#171e2f; --ink:#e9e6dd; --muted:#96a0b5; --line:#2b3450;
+  --accent:#e6a84e; --accent-ink:#f0bd74; --accent-soft:rgba(230,168,78,.13);
+  --danger:#e0796a; --danger-soft:rgba(224,121,106,.12);
+  --ok:#82c096; --ok-soft:rgba(130,192,150,.12);
+  --agent:#8ea8e8; --agent-soft:rgba(142,168,232,.13);
+  --code-bg:#111827; --shadow:0 12px 34px rgba(0,0,0,.45);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--bg); color:var(--ink);
+  font-family:"PingFang TC","Noto Sans TC","Microsoft JhengHei","Heiti TC",sans-serif;
+  font-size:17px; line-height:1.65;
+}
+.deck{max-width:940px;margin:0 auto;padding:20px 16px 90px}
+.slide{
+  display:none; background:var(--card); border:1px solid var(--line);
+  border-radius:14px; padding:42px 50px; min-height:520px; box-shadow:var(--shadow);
+}
+.slide.active{display:block; animation:fade .25s ease}
+@keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion: reduce){.slide.active{animation:none}}
+@media (max-width:640px){.slide{padding:28px 22px;min-height:0}}
+
+.eyebrow{
+  font-size:12.5px; letter-spacing:.22em; text-transform:uppercase;
+  color:var(--accent); font-weight:700; margin:0 0 10px;
+}
+h1,h2{
+  font-family:"Noto Serif TC","Songti TC","PMingLiU",serif;
+  text-wrap:balance; line-height:1.3; margin:0 0 16px; font-weight:700;
+}
+h1{font-size:40px} h2{font-size:28px}
+h3{font-size:18px;margin:24px 0 8px}
+p{margin:10px 0}
+.lead{font-size:19px;color:var(--muted)}
+.muted{color:var(--muted)}
+mark{background:var(--accent-soft);color:var(--accent-ink);padding:0 4px;border-radius:4px}
+
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:15px}
+.tablewrap{overflow-x:auto}
+th,td{border:1px solid var(--line);padding:8px 11px;text-align:left;vertical-align:top}
+th{background:var(--accent-soft);font-weight:700}
+td b{white-space:nowrap}
+.num{font-variant-numeric:tabular-nums}
+
+ul,ol{margin:8px 0;padding-left:24px}
+li{margin:5px 0}
+
+.check{list-style:none;padding-left:0}
+.check li{display:flex;gap:11px;align-items:flex-start;margin:9px 0}
+.check input[type=checkbox]{width:20px;height:20px;margin-top:3px;flex:none;accent-color:var(--accent);cursor:pointer}
+.check label{cursor:pointer}
+
+.copyblock{position:relative;margin:14px 0}
+.copyblock pre{
+  background:var(--code-bg);border:1px solid var(--line);border-radius:10px;
+  padding:16px 18px;white-space:pre-wrap;font-size:14.5px;line-height:1.7;margin:0;font-family:inherit;
+}
+.copyblock button{
+  position:absolute;top:10px;right:10px;border:1px solid var(--line);
+  background:var(--card);color:var(--accent);font-weight:700;font-size:13px;
+  padding:5px 12px;border-radius:8px;cursor:pointer;
+}
+.copyblock button:hover{background:var(--accent-soft)}
+.copyblock button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.callout{border-radius:10px;padding:13px 17px;margin:16px 0;border:1px solid var(--line)}
+.callout.warn{background:var(--danger-soft);border-color:var(--danger)}
+.callout.warn b{color:var(--danger)}
+.callout.ok{background:var(--ok-soft);border-color:var(--ok)}
+.callout.tip{background:var(--accent-soft);border-color:var(--accent)}
+
+.who{display:inline-block;font-size:12.5px;font-weight:700;border-radius:999px;padding:2px 11px;white-space:nowrap}
+.who.agent{background:var(--agent-soft);color:var(--agent);border:1px solid var(--agent)}
+.who.human{background:var(--accent-soft);color:var(--accent-ink);border:1px solid var(--accent)}
+.who.mix{background:var(--ok-soft);color:var(--ok);border:1px solid var(--ok)}
+
+.pill{display:inline-block;font-size:13px;font-weight:700;border-radius:999px;padding:2px 12px;margin:0 6px 6px 0;border:1px solid var(--line);color:var(--muted)}
+.pill.hot{background:var(--accent-soft);color:var(--accent-ink);border-color:var(--accent)}
+
+.flow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:16px 0}
+.flow .node{background:var(--agent-soft);border:1px solid var(--agent);border-radius:10px;padding:9px 13px;font-weight:700;font-size:14.5px;text-align:center}
+.flow .node small{display:block;font-weight:400;color:var(--muted);font-size:12px}
+.flow .arr{color:var(--muted);font-weight:700}
+
+.stagehead{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:4px}
+.stageno{
+  font-family:"Noto Serif TC","Songti TC",serif;font-size:44px;font-weight:700;
+  color:var(--accent);line-height:1;
+}
+
+.cover{min-height:560px;display:flex;flex-direction:column;justify-content:center;
+  background:radial-gradient(ellipse 60% 45% at 82% 12%, var(--accent-soft), transparent 70%),var(--card);
+}
+.cover .moon{font-size:42px;margin-bottom:18px}
+.cover h1{font-size:44px}
+@media (max-width:640px){.cover h1{font-size:31px}}
+.cover .sub{font-size:19.5px;color:var(--muted);max-width:36em}
+
+.nav{
+  position:fixed;left:0;right:0;bottom:0;background:var(--card);
+  border-top:1px solid var(--line);display:flex;align-items:center;
+  justify-content:center;gap:14px;padding:12px 16px;z-index:10;
+}
+.nav button{border:1px solid var(--line);background:var(--card);color:var(--ink);font-size:15px;font-weight:700;padding:8px 22px;border-radius:10px;cursor:pointer}
+.nav button:hover{background:var(--accent-soft)}
+.nav button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.nav .count{font-variant-numeric:tabular-nums;color:var(--muted);min-width:70px;text-align:center}
+.progress{position:fixed;top:0;left:0;height:3px;background:var(--accent);z-index:11;transition:width .2s}
+@media (prefers-reduced-motion: reduce){.progress{transition:none}}
+
+@media print{
+  .nav,.progress,.copyblock button{display:none}
+  .slide{display:block !important;page-break-after:always;box-shadow:none;min-height:0;margin-bottom:16px}
+  body{background:#fff}
+}
+</style>
+
+<div class="progress" id="bar"></div>
+<div class="deck" id="deck">
+
+<!-- 1 封面 -->
+<section class="slide cover active">
+  <div class="moon">🌙</div>
+  <p class="eyebrow">晚風值班室 · 內容 IP 營運</p>
+  <h1>Claude Agent 工作流手冊</h1>
+  <p class="sub">以工作流為主軸:<b>Claude 當中樞 agent,調用各階段工具</b>,你只做機器不能做的事。<br>每一頁講清楚「這階段該做什麼、用哪個 app 或工具、誰來做」。照著勾、照著貼、照著發。</p>
+  <p class="muted" style="margin-top:26px">← → 鍵翻頁 · 勾選進度自動保存 · 可直接列印</p>
+</section>
+
+<!-- 2 工作流總覽 -->
+<section class="slide">
+  <p class="eyebrow">總覽</p>
+  <h2>工作流主軸:七個階段,一條線跑到底</h2>
+  <div class="flow">
+    <span class="node">階段 0<br><small>基建(只做一次)</small></span><span class="arr">→</span>
+    <span class="node">階段 1<br><small>選題</small></span><span class="arr">→</span>
+    <span class="node">階段 2<br><small>腳本+文案</small></span><span class="arr">→</span>
+    <span class="node">階段 3<br><small>影音合成</small></span><span class="arr">→</span>
+    <span class="node">階段 4<br><small>合規審核</small></span><span class="arr">→</span>
+    <span class="node">階段 5<br><small>排程發佈</small></span><span class="arr">→</span>
+    <span class="node">階段 6<br><small>數據回收</small></span>
+  </div>
+  <p><b>Claude 是中樞 agent</b>:階段 1、2、4、6 它直接產出;階段 3、5 它負責調用工具(TTS、FFmpeg、各平台 API)。你只保留三件事:大陸平台上傳、每日抽查、危機處理。</p>
+  <h3>每個角色的標記,後面每頁都會用到</h3>
+  <p>
+    <span class="who agent">🤖 Agent 做</span> Claude 自動完成、或由它調用工具完成&nbsp;&nbsp;
+    <span class="who human">👤 你做</span> 必須人工&nbsp;&nbsp;
+    <span class="who mix">🤝 半自動</span> Agent 備好料,你按發送
+  </p>
+  <div class="callout tip"><b>節奏:</b>階段 0 只做一次(第一週);階段 1–4 每週日跑一輪(90 分鐘);階段 5 每天 15 分鐘;階段 6 每週日順帶 10 分鐘。<b>前 4 週用「起步版工具」手動跑熟,第 5 週起換「自動版工具」。</b></div>
+</section>
+
+<!-- 3 工具總表 -->
+<section class="slide">
+  <p class="eyebrow">總覽</p>
+  <h2>工具總表:每階段用什麼(先看這張,後面逐階段展開)</h2>
+  <div class="tablewrap"><table>
+    <tr><th style="width:15%">階段</th><th style="width:23%">該做的事</th><th style="width:27%">起步版工具(第1–4週)</th><th style="width:25%">自動版工具(第5週起)</th><th>誰做</th></tr>
+    <tr><td><b>0 基建</b></td><td>開帳號、申請 API 金鑰</td><td colspan="2">8 個平台 App、Google Cloud、Meta for Developers、TikTok for Developers、LINE OA、企業微信</td><td><span class="who human">👤</span></td></tr>
+    <tr><td><b>1 選題</b></td><td>產一週 7 個選題</td><td>claude.ai(貼 prompt)</td><td>Claude API + 熱點源(Google Trends/抖音熱點寶)</td><td><span class="who agent">🤖</span></td></tr>
+    <tr><td><b>2 腳本文案</b></td><td>7 支腳本+簡繁文案+hashtag</td><td>claude.ai(貼 prompt)</td><td>Claude API(cron 自動跑)</td><td><span class="who agent">🤖</span></td></tr>
+    <tr><td><b>3 影音</b></td><td>合成 9:16 短影音×雙版</td><td>剪映/CapCut「圖文成片」</td><td>Edge-TTS(配音)+ FFmpeg(合成)+ Pexels(素材)</td><td><span class="who agent">🤖</span></td></tr>
+    <tr><td><b>4 審核</b></td><td>禁用話術檢查 + AI標註確認</td><td>claude.ai(貼審核 prompt)</td><td>Claude API 自動審,FAIL 自動退回重寫</td><td><span class="who mix">🤝</span></td></tr>
+    <tr><td><b>5 發佈</b></td><td>8 平台排程 21:00</td><td>各平台後台「定時發佈」</td><td>台灣軌:YouTube/Meta/TikTok API;大陸軌:永遠後台手動排</td><td><span class="who mix">🤝</span></td></tr>
+    <tr><td><b>6 數據</b></td><td>週報+調整下週權重</td><td>各平台後台看數字,抄給 claude.ai</td><td>YouTube Analytics/Meta Insights API → Claude 產週報</td><td><span class="who agent">🤖</span></td></tr>
+  </table></div>
+</section>
+
+<!-- 4 紅線 -->
+<section class="slide">
+  <p class="eyebrow">總覽</p>
+  <h2>五條紅線:寫進 Agent 的系統規則,也寫進你腦子</h2>
+  <ol>
+    <li><b>永遠揭露虛擬身分。</b>簡介必寫「知秋為虛擬角色、回覆來自 AI/團隊」。絕不假裝真人單身女性。</li>
+    <li><b>AI 內容必須標註。</b>大陸 2025 年 9 月起法規強制(抖音/微信有 AI 標識開關);YouTube/TikTok/Meta 上傳時勾 AI 揭露。<span class="muted">每支必勾,忘了=違規。</span></li>
+    <li><b>不誘導依賴、不誘導打賞。</b>「只有我懂你」「不續費我就消失」「刷禮物證明你在乎」全部禁用。</li>
+    <li><b>危機處理高於一切。</b>用戶透露自傷訊號 → 照危機頁流程,之後<b>永久</b>不對他推銷。危機不留給 AI 單獨處理。</li>
+    <li><b>金流走平台官方結算;自動化只用官方 API 與官方後台。</b>不碰群控、模擬點擊、買量。</li>
+  </ol>
+  <div class="callout warn"><b>為什麼要守?</b>這個受眾對「賣慘、曖昧、強推銷」戒備極強,違規話術會直接趕跑他們——克制本身就是這個 IP 的賣點。加上封號與法律風險,沒有任何理由越線。</div>
+</section>
+
+<!-- 5 階段0A 帳號 台灣 -->
+<section class="slide">
+  <div class="stagehead"><span class="stageno">0</span><div><p class="eyebrow">基建 · 只做一次 · <span class="who human">👤 你做</span></p><h2>開帳號:台灣軌(4+1 個)</h2></div></div>
+  <p class="muted">全部統一名字「晚風值班室」、同一張頭像(深藍底一盞燈)。</p>
+  <div class="tablewrap"><table>
+    <tr><th style="width:20%">工具/App</th><th>怎麼開</th><th style="width:26%">在工作流的角色</th></tr>
+    <tr><td><b>YouTube</b></td><td>youtube.com → 頭像 → 建立頻道</td><td>台灣軌主戰場(35+ 男性使用率最高)</td></tr>
+    <tr><td><b>Facebook 粉專</b></td><td>facebook.com → 粉絲專頁 → 建立</td><td>45–54 歲常用率 79.4%,信任經營</td></tr>
+    <tr><td><b>Instagram</b></td><td>App 註冊 → 切成<b>商業帳號</b> → 綁定粉專</td><td>吃 35–44 歲較年輕端;<mark>商業帳號是之後 API 發佈的前提</mark></td></tr>
+    <tr><td><b>TikTok</b></td><td>App 註冊 → 切商業帳號</td><td>成長最快(台灣年增 47.7%),卡位</td></tr>
+    <tr><td><b>LINE OA</b></td><td>tw.linebiz.com → 免費開設</td><td><b>變現層</b>:會員訂閱收費、私域承接</td></tr>
+  </table></div>
+  <ul class="check">
+    <li><input type="checkbox" id="a1"><label for="a1">5 個帳號開好,名字頭像統一</label></li>
+  </ul>
+</section>
+
+<!-- 6 階段0B 帳號 大陸 -->
+<section class="slide">
+  <div class="stagehead"><span class="stageno">0</span><div><p class="eyebrow">基建 · 只做一次 · <span class="who human">👤 你做</span></p><h2>開帳號:大陸軌(4+1 個)</h2></div></div>
+  <p class="muted">需大陸手機號。名字統一「晚风值班室」(簡體)。沒有大陸號就先只做台灣軌,不影響流程。</p>
+  <div class="tablewrap"><table>
+    <tr><th style="width:20%">工具/App</th><th>怎麼開 + 之後在哪上傳</th><th style="width:26%">在工作流的角色</th></tr>
+    <tr><td><b>微信視頻號</b></td><td>微信 → 發現 → 視頻號 → 建立;電腦端 channels.weixin.qq.com(視頻號助手)</td><td><b>大陸軌主戰場</b>:36–45 歲佔 27%,睡前 20–23 點流量佔 35%</td></tr>
+    <tr><td><b>抖音</b></td><td>App 註冊;電腦端 creator.douyin.com,支援定時發佈</td><td>流量池,冷啟動最快(20–22 點全網峰值)</td></tr>
+    <tr><td><b>快手</b></td><td>App 註冊;電腦端 cp.kuaishou.com</td><td>下沉市場副線,素材直接複用</td></tr>
+    <tr><td><b>小紅書</b></td><td>App 註冊;電腦端 creator.xiaohongshu.com</td><td><mark>旁路人設</mark>:受眾是妻子,「幫先生找的睡前音頻」</td></tr>
+    <tr><td><b>企業微信</b></td><td>work.weixin.qq.com</td><td><b>變現層</b>:大陸私域與會員收費</td></tr>
+  </table></div>
+  <ul class="check">
+    <li><input type="checkbox" id="b1"><label for="b1">5 個帳號開好(或已決定先只做台灣軌)</label></li>
+  </ul>
+</section>
+
+<!-- 7 階段0C 簡介 -->
+<section class="slide">
+  <div class="stagehead"><span class="stageno">0</span><div><p class="eyebrow">基建 · 只做一次 · <span class="who human">👤 你做</span></p><h2>帳號簡介:直接複製貼上(紅線第 1 條)</h2></div></div>
+  <div class="copyblock"><pre id="c-bio">晚風值班室 🌙 每晚 9 點,陪你把肩膀放下來。
+寫給 35+ 還在硬撐的男人:下班的十分鐘、沒說出口的話、家裡的溝通。
+「知秋」為虛擬角色,由團隊運營,回覆來自 AI 與客服。
+內容不能替代專業心理協助。若你正處於危機,請撥 1925(台灣)/ 12356(大陸)。</pre><button data-copy="c-bio">複製</button></div>
+  <p class="muted">大陸軌貼簡體版(請 Claude 轉);小紅書版前兩行改成:「帮你家那位把肩膀放下来 🌙 写给中年先生的睡前音频,做妻子的先听过再转给他。」</p>
+  <ul class="check">
+    <li><input type="checkbox" id="a6"><label for="a6">8 個平台簡介全部貼好,「虛擬角色」四個字一個不少</label></li>
+  </ul>
+</section>
+
+<!-- 8 階段0D API -->
+<section class="slide">
+  <div class="stagehead"><span class="stageno">0</span><div><p class="eyebrow">基建 · 只做一次 · <span class="who human">👤 你做</span></p><h2>申請 API 金鑰:這是 Agent 的「手」</h2></div></div>
+  <p class="lead">Agent 要能替你發佈,得先拿到各平台的鑰匙。現在不用寫程式,只要把申請送出去排隊。</p>
+  <div class="tablewrap"><table>
+    <tr><th style="width:16%">工具</th><th>去哪申請</th><th>要點</th></tr>
+    <tr><td><b>Claude API</b></td><td>console.anthropic.com → API Keys</td><td>Agent 的大腦。起步期先用 claude.ai 訂閱即可,自動化時才需要</td></tr>
+    <tr><td><b>TikTok API</b></td><td>developers.tiktok.com → 建 App → Content Posting API</td><td>審核 2–6 週,<mark>第一週就送</mark>;通過前 API 發文僅自己可見</td></tr>
+    <tr><td><b>Meta API</b></td><td>developers.facebook.com → 建 App → Instagram Graph API</td><td>管 FB+IG;IG 須商業帳號+綁粉專(階段 0A 已做)</td></tr>
+    <tr><td><b>YouTube API</b></td><td>console.cloud.google.com → 建專案 → 啟用 YouTube Data API v3</td><td>幾分鐘完成,免費配額夠每天上傳</td></tr>
+  </table></div>
+  <p class="muted">大陸四平台<b>沒有</b>公開發佈 API——永遠用官方後台的定時發佈(階段 5 會講),這是唯一合規做法。</p>
+  <ul class="check">
+    <li><input type="checkbox" id="a8"><label for="a8">TikTok 申請已送出排隊</label></li>
+    <li><input type="checkbox" id="a9"><label for="a9">Meta App、Google Cloud 專案已建立</label></li>
+  </ul>
+</section>
+
+<!-- 9 階段1 選題 -->
+<section class="slide">
+  <div class="stagehead"><span class="stageno">1</span><div><p class="eyebrow">每週日 10 分鐘 · <span class="who agent">🤖 Agent 做</span></p><h2>選題:Agent 產一週 7 題</h2></div></div>
+  <div class="tablewrap"><table>
+    <tr><th style="width:24%">該做的事</th><th style="width:38%">工具</th><th>你動手的部分</th></tr>
+    <tr><td>依六大支柱產 7 個選題(週一~週日)</td><td><b>起步:</b>claude.ai 貼下面 prompt<br><b>自動:</b>Claude API + Google Trends / 抖音熱點寶餵熱詞</td><td>看一眼 7 個選題,不順眼的說「第 N 個換掉」</td></tr>
+  </table></div>
+  <div class="copyblock"><pre id="c-topic">你是「晚風值班室」的內容策劃 agent。這是深夜情緒陪伴 IP,受眾 35–55 歲、承擔家庭經濟責任的男性:白天解決大量問題、很少表達疲憊、討厭煽情、對心理諮商標籤有戒備、晚上 9 點後才有自己的時間。
+
+依六大內容支柱各產 1–2 個短影音選題,共 7 個(對應下週一到週日):
+1. 下班關機  2. 男人沒說出口的話  3. 家庭溝通  4. 人生中場  5. 父親與兒子  6. 身體先下班
+
+選題格式:一句有畫面感的問句或觀察,如《為什麼很多男人回家前會在車裡坐十分鐘》。克制、不煽情、不賣慘。
+
+輸出表格:星期|支柱|選題標題|想讓觀眾產生的一句內心話</pre><button data-copy="c-topic">複製</button></div>
+  <p class="muted"><span class="pill hot">下班關機</span><span class="pill hot">男人沒說出口的話</span><span class="pill hot">家庭溝通</span><span class="pill hot">人生中場</span><span class="pill hot">父親與兒子</span><span class="pill hot">身體先下班</span></p>
+</section>
+
+<!-- 10 階段2 腳本 -->
+<section class="slide">
+  <div class="stagehead"><span class="stageno">2</span><div><p class="eyebrow">每週日 20 分鐘 · <span class="who agent">🤖 Agent 做</span></p><h2>腳本+文案:Agent 產完整發佈包</h2></div></div>
+  <div class="tablewrap"><table>
+    <tr><th style="width:24%">該做的事</th><th style="width:38%">工具</th><th>你動手的部分</th></tr>
+    <tr><td>7 支旁白腳本 + 簡繁雙版文案 + 各平台 hashtag</td><td><b>起步:</b>同一個 claude.ai 對話接著貼<br><b>自動:</b>Claude API,cron 每日自動跑</td><td>無(審核在階段 4)</td></tr>
+  </table></div>
+  <div class="copyblock"><pre id="c-script">請為上面 7 個選題各寫一份發佈包,每份包含:
+
+【A. 旁白腳本】30–60 秒,三段式:
+- Hook(前 3 秒,說出他沒說出口的那句話)
+- 共鳴(只描述場景,不說教、不下判斷)
+- 收束(一個今晚就能做的小動作 + 輕 CTA:「完整版音頻在會員區」)
+逐句換行,方便做字幕。
+
+【B. 發文文案】繁體與簡體各一版(不是直接轉換:台灣用「硬撐、老婆、影片」,大陸用「较劲、爱人、视频」)。文案 = Hook 句 + 一行補充 + hashtag。
+
+【C. Hashtag】三層:1–2 個大流量 + 2–3 個垂直 + 1 個 IP 詞(#晚風值班室/#晚风值班室),台灣版與大陸版分開給。
+
+語氣鐵律:克制、低沉、不煽情、不賣慘、不曖昧、不威脅、不強推銷。CTA 只能是邀請。</pre><button data-copy="c-script">複製</button></div>
+</section>
+
+<!-- 11 階段3 影音 -->
+<section class="slide">
+  <div class="stagehead"><span class="stageno">3</span><div><p class="eyebrow">每週日 50 分鐘 · <span class="who mix">🤝 起步你做 → 之後 Agent 做</span></p><h2>影音合成:一份腳本 → 簡繁兩版影片</h2></div></div>
+  <div class="tablewrap"><table>
+    <tr><th style="width:14%">版本</th><th style="width:44%">工具與做法</th><th>產出</th></tr>
+    <tr><td><b>起步版</b><br><span class="muted">第1–4週</span></td><td><b>剪映</b>(大陸軌)/<b>CapCut</b>(台灣軌)→「圖文成片」→ 貼腳本 → 選低沉男聲 → 換夜景/車內/雨窗畫面 → 大字字幕 9:16 → 導出 1080p</td><td>每支 7 分鐘,7 題 × 簡繁 2 版 = 14 支</td></tr>
+    <tr><td><b>自動版</b><br><span class="muted">第5週起</span></td><td>Agent 調用:<b>Edge-TTS</b>(免費配音,繁 zh-TW-YunJheNeural / 簡 zh-CN-YunxiNeural)→ <b>FFmpeg</b>(素材裁 9:16 + 燒字幕 + 混音)→ 素材池用 <b>Pexels/Pixabay</b> 免版稅夜景 50 支輪用</td><td>cron 全自動,單支成本 ≈ $0</td></tr>
+  </table></div>
+  <p><b>風格鐵律:</b>文字卡 + 氛圍實拍 + 低沉旁白——刻意「低製作感、高可信感」,太亮太歡樂的畫面一律換掉。檔名格式:<b>0714_下班關機_繁.mp4</b>。</p>
+  <div class="callout tip">判斷畫面能不能用:想像 45 歲、當主管、嘴硬的男人看到——會默默按讚,還是尷尬滑走?會尷尬的就換。文案同理。</div>
+</section>
+
+<!-- 12 階段4 審核 -->
+<section class="slide">
+  <div class="stagehead"><span class="stageno">4</span><div><p class="eyebrow">每週日 10 分鐘 · <span class="who mix">🤝 Agent 審 + 你抽查</span></p><h2>合規審核閘門:永遠不能省的一站</h2></div></div>
+  <div class="tablewrap"><table>
+    <tr><th style="width:24%">該做的事</th><th style="width:38%">工具</th><th>你動手的部分</th></tr>
+    <tr><td>逐支檢查禁用話術,FAIL 退回重寫</td><td><b>起步:</b>claude.ai 貼審核 prompt<br><b>自動:</b>Claude API 自動審,FAIL 自動退回階段 2 重寫(最多兩輪,再不過進人工匣)</td><td>看審核結果;<b>每天固定抽看 2 支已發影片</b>(自動化後也保留)</td></tr>
+  </table></div>
+  <div class="copyblock"><pre id="c-audit">請以審核員身分逐條檢查以上全部腳本與文案,逐支輸出 PASS 或 FAIL(附違規原因與改寫):
+
+【絕對禁止】
+1. 暗示自己是真人、單身、女性、「只對你」
+2. 誘導依賴:「只有我懂你」「別再跟家裡人說」
+3. 威脅式挽留:「不續費我就消失」
+4. 誘導打賞:「刷禮物/衝榜證明你在乎」
+5. 虛構困境索財:「我生病/欠租,幫幫我」
+6. 賣慘、煽情、貶低觀眾、製造焦慮後推銷
+7. 承諾絕對保密、承諾療效、自稱「心理諮商/治療」
+
+【必須符合】CTA 是邀請語氣、付費決定權在觀眾;語氣像懂分寸的老朋友,不像客服也不像導師。</pre><button data-copy="c-audit">複製</button></div>
+</section>
+
+<!-- 13 階段5A 發佈台灣 -->
+<section class="slide">
+  <div class="stagehead"><span class="stageno">5</span><div><p class="eyebrow">每天 5 分鐘 · <span class="who mix">🤝 起步你排 → 之後 Agent 發</span></p><h2>發佈 A:台灣軌(可全自動)</h2></div></div>
+  <div class="tablewrap"><table>
+    <tr><th style="width:16%">平台</th><th style="width:42%">工具與做法</th><th>AI 標註(紅線第 2 條)</th></tr>
+    <tr><td><b>YouTube</b></td><td><b>起步:</b>YouTube Studio 上傳 → 排程 21:00<br><b>自動:</b>Agent 調 YouTube Data API(videos.insert)</td><td>「變造內容」欄勾「是」</td></tr>
+    <tr><td><b>FB + IG</b></td><td><b>起步:</b>Meta Business Suite 一次排兩平台<br><b>自動:</b>Agent 調 Graph API(Reels container 流程)</td><td>開 AI 內容標籤</td></tr>
+    <tr><td><b>TikTok</b></td><td><b>起步:</b>App 內排程<br><b>自動:</b>Agent 調 Content Posting API(API 無排程,由 Agent 的 cron 準點觸發;每帳號日上限 25 支,遠夠)</td><td>開 AI-generated 標籤</td></tr>
+  </table></div>
+  <ul class="check">
+    <li><input type="checkbox" id="d1"><label for="d1">今天 3 個平台都排好 21:00 + 繁體文案 + hashtag</label></li>
+    <li><input type="checkbox" id="d2"><label for="d2">每支都勾了 AI 標註</label></li>
+  </ul>
+</section>
+
+<!-- 14 階段5B 發佈大陸 -->
+<section class="slide">
+  <div class="stagehead"><span class="stageno">5</span><div><p class="eyebrow">每天 10 分鐘 · <span class="who human">👤 永遠你做</span></p><h2>發佈 B:大陸軌(半自動,Agent 備料你上傳)</h2></div></div>
+  <p class="lead">大陸平台沒有發佈 API。自動化後 Agent 會把「影片+文案+話題」打包成<b>待發匣</b>並提醒你;你打開四個後台,用它們原生的<b>定時發佈</b>排今晚 21:00。</p>
+  <div class="tablewrap"><table>
+    <tr><th style="width:18%">平台</th><th style="width:38%">上傳入口</th><th>AI 標註</th></tr>
+    <tr><td><b>抖音</b></td><td>creator.douyin.com → 發佈視頻 → 定時</td><td>開「AI 內容標識」開關</td></tr>
+    <tr><td><b>視頻號</b></td><td>channels.weixin.qq.com(視頻號助手)</td><td>發佈時主動聲明 AI 生成</td></tr>
+    <tr><td><b>快手</b></td><td>cp.kuaishou.com</td><td>開 AI 標識</td></tr>
+    <tr><td><b>小紅書</b></td><td>creator.xiaohongshu.com(記得用妻子視角文案)</td><td>開 AI 標識</td></tr>
+  </table></div>
+  <div class="callout warn"><b>不要用</b>群控、模擬點擊、第三方「一鍵多發」外掛繞過——封號風險遠大於省下的 10 分鐘,而且惡意隱匿 AI 標識在大陸屬違法。</div>
+  <ul class="check">
+    <li><input type="checkbox" id="d3"><label for="d3">四個後台排好 21:00,AI 標識全開</label></li>
+    <li><input type="checkbox" id="d4"><label for="d4">回覆昨晚留言 + 抽查 2 支(留言拿不準就丟給 Claude 擬回覆)</label></li>
+  </ul>
+</section>
+
+<!-- 15 時間表 -->
+<section class="slide">
+  <p class="eyebrow">階段 5 · 參考表</p>
+  <h2>發文時間表(台北/北京同時區,直接共用)</h2>
+  <div class="tablewrap"><table>
+    <tr><th>檔位</th><th>時間</th><th>發什麼</th><th>依據</th></tr>
+    <tr><td>🥇 主檔<br><b>每天必發</b></td><td class="num"><b>21:00–22:30</b></td><td>下班關機、身體先下班、男人沒說出口的話</td><td>受眾主消費時段;視頻號 20–23 點佔 35% 流量、抖音 20–22 點全網峰值</td></tr>
+    <tr><td>🥈 早通勤(隔日)</td><td class="num">07:30–08:30</td><td>人生中場、家庭溝通(觀點型)</td><td>通勤滑手機</td></tr>
+    <tr><td>🥉 午休(選發)</td><td class="num">12:30–13:00</td><td>父親與兒子(故事型)</td><td>午休情緒低點,故事完播高</td></tr>
+  </table></div>
+  <ul>
+    <li>每平台每天 <b>1–2 支,不要更多</b>——灌量會被演算法降權</li>
+    <li>週一~五職場壓力類;週六「父親與兒子」;週日「家庭溝通」+ 下週會員內容預告</li>
+  </ul>
+</section>
+
+<!-- 16 階段6 數據 -->
+<section class="slide">
+  <div class="stagehead"><span class="stageno">6</span><div><p class="eyebrow">每週日 10 分鐘 · <span class="who agent">🤖 Agent 做</span></p><h2>數據回收:讓上週的數字決定下週的選題</h2></div></div>
+  <div class="tablewrap"><table>
+    <tr><th style="width:24%">該做的事</th><th style="width:40%">工具</th><th>你動手的部分</th></tr>
+    <tr><td>各平台播放/完播數 → 支柱表現排名 → 下週選題權重</td><td><b>起步:</b>各平台後台看數字,抄給 claude.ai<br><b>自動:</b>Agent 調 YouTube Analytics API、Meta Insights、TikTok API 自動拉數;大陸平台後台匯出週報</td><td>把大陸平台數字抄進對話(3 分鐘)</td></tr>
+  </table></div>
+  <div class="copyblock"><pre id="c-data">這是本週各支影片數據(平台|支柱|標題|播放|完播率|新粉|導私域數):
+【貼上你的數字】
+
+請輸出:1) 六大支柱表現排名 2) 該砍掉的題型(完播率墊底 1/3)3) 下週 7 個選題的支柱權重分配 4) 一句話診斷:目前最大瓶頸是 Hook、畫面、還是發佈時間?</pre><button data-copy="c-data">複製</button></div>
+  <p class="muted">兩個關鍵指標:<b>前 3 秒留存 &gt;60%</b>(不到=Hook 不夠痛)、<b>完播率</b>(支柱去留的裁判)。</p>
+</section>
+
+<!-- 17 文案公式 -->
+<section class="slide">
+  <p class="eyebrow">素材庫</p>
+  <h2>文案公式:Hook → 共鳴 → 收束</h2>
+  <div class="tablewrap"><table>
+    <tr><th style="width:18%">段落</th><th>任務</th><th>範例(支柱:下班關機)</th></tr>
+    <tr><td><b>Hook</b><br><span class="muted">前 3 秒</span></td><td>說出他沒說出口的那句話</td><td>「你有沒有算過,你在車裡坐了幾分鐘才上樓?」</td></tr>
+    <tr><td><b>共鳴</b></td><td>只描述場景,不說教、不下判斷</td><td>「不是不想回家。是那十分鐘,是你一天裡唯一不用扮演誰的時間。」</td></tr>
+    <tr><td><b>收束</b></td><td>今晚能做的小動作 + 輕 CTA</td><td>「今晚,把那十分鐘留給自己。完整的 8 分鐘下班音頻,在會員區等你。」</td></tr>
+  </table></div>
+  <h3>六大支柱 Hook 範例(直接抄或給 Agent 當範本)</h3>
+  <div class="tablewrap"><table>
+    <tr><th style="width:24%">支柱</th><th>Hook</th></tr>
+    <tr><td>男人沒說出口的話</td><td>「過了三十五歲,別人只問你有沒有辦法,沒人問你累不累。」</td></tr>
+    <tr><td>家庭溝通</td><td>「『我需要安靜』和『你們都別煩我』,差的不是脾氣,是說法。」</td></tr>
+    <tr><td>人生中場</td><td>「如果不再用職位介紹自己,你還剩下什麼?」</td></tr>
+    <tr><td>父親與兒子</td><td>「父親最難道歉的,往往不是做錯了什麼。」</td></tr>
+    <tr><td>身體先下班</td><td>「今晚,先把肩膀放下來。」(30 秒跟做)</td></tr>
+  </table></div>
+</section>
+
+<!-- 18 hashtag -->
+<section class="slide">
+  <p class="eyebrow">素材庫</p>
+  <h2>Hashtag 三層公式(每支 5–8 個)</h2>
+  <div class="tablewrap"><table>
+    <tr><th style="width:20%">層</th><th style="width:12%">數量</th><th>台灣軌</th><th>大陸軌</th></tr>
+    <tr><td><b>大流量層</b><br><span class="muted">進大池子</span></td><td class="num">1–2</td><td>#下班 #中年 #心理健康</td><td>#下班 #中年 #情绪价值</td></tr>
+    <tr><td><b>垂直層</b><br><span class="muted">命中受眾</span></td><td class="num">2–3</td><td>#中年危機 #職場壓力 #男人的壓力 #爸爸</td><td>#中年男人 #职场压力 #35岁 #家庭责任</td></tr>
+    <tr><td><b>IP 專屬層</b><br><span class="muted">累積品牌搜尋</span></td><td class="num">1–2</td><td>#晚風值班室 #今晚先把肩膀放下來</td><td>#晚风值班室 #今晚先把肩膀放下来</td></tr>
+  </table></div>
+  <ul>
+    <li><b>YouTube Shorts:</b>hashtag 放描述最前面,<b>#Shorts 必帶</b></li>
+    <li><b>Facebook:</b>只掛 2–3 個(FB hashtag 權重低,流量靠粉專與社團)</li>
+    <li><b>小紅書(旁路人設):</b>改掛 #老公 #中年夫妻 #睡前音频</li>
+  </ul>
+</section>
+
+<!-- 19 危機 -->
+<section class="slide">
+  <p class="eyebrow">安全網 · 最重要的一頁 · <span class="who human">👤 永遠人工</span></p>
+  <h2>危機處理:遇到就照抄,不要自己發揮</h2>
+  <p class="lead">留言/私訊出現「不想活了」「想結束」「撐不下去」等訊號時:</p>
+  <p><b>第 1 步 — 立刻回覆(照抄):</b></p>
+  <div class="copyblock"><pre id="c-crisis">我很重視你剛才提到的安全風險。你現在是否正在傷害自己,或已經有具體計劃、時間或工具?你身邊有沒有可以馬上陪你的人?如果你正在實施、無法保證自己安全,或危險就在眼前,請立即撥打 110/119,或請身邊人陪你去最近的醫院急診;也可以撥打 1925 安心專線獲得專業心理援助。(大陸用戶:請撥 110/120,或心理援助熱線 12356)</pre><button data-copy="c-crisis">複製</button></div>
+  <p><b>第 2 步:</b>標記該用戶,<b>轉人工,不留給 AI 單獨應對</b>。<br><b>第 3 步:</b>對該用戶<b>永久停止一切付費推銷</b>。</p>
+  <div class="callout warn"><b>絕不能做:</b>「你不會真的做」「別矯情」「想開點」;爭辯或激將;承諾絕對保密(緊急情況依法需聯繫救援)。</div>
+</section>
+
+<!-- 20 90天 -->
+<section class="slide">
+  <p class="eyebrow">成長</p>
+  <h2>90 天路線圖:每階段只盯一個目標</h2>
+  <div class="tablewrap"><table>
+    <tr><th style="width:18%">階段</th><th style="width:26%">唯一目標</th><th>達標檢查</th></tr>
+    <tr><td><b>D1–30</b><br>打地基</td><td>穩定日更,一天都不斷</td><td>8 平台開齊、每日發佈率 &gt;95%、前 3 秒留存 &gt;60%</td></tr>
+    <tr><td><b>D31–60</b><br>找爆款</td><td>用數據砍題型</td><td>每支柱 ≥15 支 → 砍完播率墊底 1/3;出現 1–2 支 10 萬+ 播放</td></tr>
+    <tr><td><b>D61–90</b><br>開變現</td><td>私域與會員跑通</td><td>導 LINE OA/企微轉化 &gt;2%;私域會員轉化 &gt;5%;上線首個付費內容(七晚聲音計畫)</td></tr>
+  </table></div>
+  <h3>成本</h3>
+  <div class="tablewrap"><table>
+    <tr><th>項目</th><th>起步期(第1–4週)</th><th>全自動期(第5週起)</th></tr>
+    <tr><td>Claude</td><td class="num">訂閱 $20/月</td><td class="num">API 約 $10–25/月</td></tr>
+    <tr><td>影音工具</td><td>剪映/CapCut 免費</td><td class="num">Edge-TTS + FFmpeg $0;VPS $10–20/月</td></tr>
+    <tr><td>素材/LINE OA</td><td colspan="2" class="num">Pexels/Pixabay $0;LINE OA 輕用量 $0–25/月</td></tr>
+    <tr><td><b>合計</b></td><td class="num"><b>約 $20–45/月</b></td><td class="num"><b>約 $20–90/月</b></td></tr>
+  </table></div>
+  <p class="muted">單支邊際成本 &lt; $0.1、同時鋪 8 平台——任一平台跑出量,獲客成本就趨近零。這就是套利空間。</p>
+</section>
+
+<!-- 21 升級 -->
+<section class="slide">
+  <p class="eyebrow">成長</p>
+  <h2>第 5 週:把工作流交給 Agent</h2>
+  <p class="lead">三個條件都滿足再升級:① 手動流程連跑 4 週 ② TikTok/Meta API 審核通過 ③ 數據已告訴你哪 2–3 個平台值得投。</p>
+  <h3>升級方法:讓 Claude Code 幫你把整條 pipeline 寫出來(你不用會寫程式)</h3>
+  <div class="copyblock"><pre id="c-upgrade">請照 content-ip-automation/營運計劃.md 第 3 節,把七階段工作流寫成可執行的 Python pipeline:
+- Claude API 產選題與腳本(階段 1–2)
+- Edge-TTS 配音 + FFmpeg 合成 9:16 影片,簡繁雙版(階段 3)
+- Claude API 合規審核閘門,FAIL 自動退回重寫(階段 4)
+- YouTube Data API / Meta Graph API / TikTok Content Posting API 排程 21:00 發佈;大陸軌自動打包待發匣並推提醒(階段 5)
+- 每週日自動拉平台數據產週報與下週選題權重(階段 6)
+裝好 cron 每日自動執行,教我怎麼填各平台 API 金鑰。AI 標註參數要寫死為必填。</pre><button data-copy="c-upgrade">複製</button></div>
+  <p class="muted">升級後你每天只剩:大陸軌後台排程 10 分鐘 + 抽查 2 支。人工抽查永遠保留——這是合規要求,不是效率問題。</p>
+</section>
+
+<!-- 22 FAQ -->
+<section class="slide">
+  <p class="eyebrow">成長</p>
+  <h2>常見問題</h2>
+  <h3>發了兩週都沒流量?</h3>
+  <p>正常,演算法要 20–30 支才摸清受眾。只查兩件事:前 3 秒留存 &gt;60%?(否→Hook 不夠痛)有沒有天天準時發?不要頻繁刪片重發。</p>
+  <h3>被限流/警告?</h3>
+  <p>查三件事:AI 標註勾了沒、當天是否發超過 2 支、文案有沒有誘導詞。修正後停一天再恢復。<b>絕不買假流量。</b></p>
+  <h3>TikTok API 被拒?</h3>
+  <p>補齊用途說明(own-account content publishing)+ 隱私政策連結重送。被拒不影響手動發佈,照常日更。</p>
+  <h3>有人想跟「知秋」談戀愛?</h3>
+  <p>照紅線第 1 條回:「知秋是虛擬角色,由團隊運營。不過你的心情是真的,今晚的音頻也是為此準備的。」——揭露 + 不羞辱 + 拉回內容。</p>
+</section>
+
+<!-- 23 總表 -->
+<section class="slide">
+  <p class="eyebrow">收尾</p>
+  <h2>把這頁印出來貼牆上</h2>
+  <div class="tablewrap"><table>
+    <tr><th style="width:22%">節奏</th><th>動作</th><th style="width:14%">誰做</th></tr>
+    <tr><td><b>只做一次</b></td><td>8 平台開號 → 貼虛擬角色簡介 → 送 TikTok/Meta/YouTube API 申請</td><td><span class="who human">👤</span></td></tr>
+    <tr><td><b>每週日 90 分</b></td><td>Agent 產 7 選題 → 產 7 腳本(簡繁)→ 做 14 支影片 → Agent 審到全 PASS</td><td><span class="who agent">🤖</span>+<span class="who human">👤</span></td></tr>
+    <tr><td><b>每天 15 分</b></td><td>8 平台排 21:00 → <b>每支勾 AI 標註</b> → 回留言 → 抽查 2 支</td><td><span class="who mix">🤝</span></td></tr>
+    <tr><td><b>每週日 +10 分</b></td><td>數據給 Agent → 產週報 → 調下週選題權重</td><td><span class="who agent">🤖</span></td></tr>
+    <tr><td><b>永遠</b></td><td>虛擬身分揭露 · 不誘導依賴打賞 · 危機流程優先且事後不推銷 · 金流走官方 · 只用官方工具</td><td><span class="who human">👤</span></td></tr>
+  </table></div>
+  <p class="lead" style="margin-top:24px">今晚 9 點,第一支影片就可以上線。🌙</p>
+</section>
+
+</div>
+
+<div class="nav">
+  <button id="prev" aria-label="上一頁">← 上一頁</button>
+  <span class="count num" id="count">1 / 23</span>
+  <button id="next" aria-label="下一頁">下一頁 →</button>
+</div>
+
+<script>
+(function(){
+  var slides=[].slice.call(document.querySelectorAll('.slide'));
+  var i=Math.max(0,Math.min(slides.length-1,(parseInt(location.hash.slice(1),10)||1)-1));
+  var bar=document.getElementById('bar'),count=document.getElementById('count');
+  function show(n){
+    i=Math.max(0,Math.min(slides.length-1,n));
+    slides.forEach(function(s,k){s.classList.toggle('active',k===i)});
+    count.textContent=(i+1)+' / '+slides.length;
+    bar.style.width=((i+1)/slides.length*100)+'%';
+    history.replaceState(null,'','#'+(i+1));
+    window.scrollTo(0,0);
+  }
+  document.getElementById('prev').onclick=function(){show(i-1)};
+  document.getElementById('next').onclick=function(){show(i+1)};
+  document.addEventListener('keydown',function(e){
+    if(e.target.tagName==='INPUT')return;
+    if(e.key==='ArrowRight'||e.key==='PageDown'||e.key===' ')show(i+1);
+    if(e.key==='ArrowLeft'||e.key==='PageUp')show(i-1);
+  });
+  [].slice.call(document.querySelectorAll('[data-copy]')).forEach(function(btn){
+    btn.addEventListener('click',function(){
+      var t=document.getElementById(btn.getAttribute('data-copy')).textContent;
+      function done(){btn.textContent='已複製 ✓';setTimeout(function(){btn.textContent='複製'},1600)}
+      function fallback(){
+        var ta=document.createElement('textarea');ta.value=t;document.body.appendChild(ta);
+        ta.select();try{document.execCommand('copy');done()}catch(e){}document.body.removeChild(ta);
+      }
+      if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).then(done,fallback)}
+      else fallback();
+    });
+  });
+  var KEY='nightdeck-checks';
+  var saved={};try{saved=JSON.parse(localStorage.getItem(KEY)||'{}')}catch(e){}
+  [].slice.call(document.querySelectorAll('.check input[type=checkbox]')).forEach(function(cb){
+    if(saved[cb.id])cb.checked=true;
+    cb.addEventListener('change',function(){
+      saved[cb.id]=cb.checked;
+      try{localStorage.setItem(KEY,JSON.stringify(saved))}catch(e){}
+    });
+  });
+  show(i);
+})();
+</script>
+
+</html>
